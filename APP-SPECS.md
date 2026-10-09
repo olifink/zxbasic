@@ -180,5 +180,5 @@ zxbasic/
 ### Initial Makefile Requirements
 
 * Compiler flags: `CFLAGS = -std=c99 -Wall -Wextra -pedantic -O2 -g`
-* Targets: `all` (builds `zx-unix`), `clean`, `test`.
+* Targets: `all` (builds `zxbasic`), `clean`, `test`.
 

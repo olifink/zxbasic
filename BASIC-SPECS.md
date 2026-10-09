@@ -1,6 +1,6 @@
 # BASIC-SPECS.md - ZXBASIC Dialect Specification
 
-Standardized language specification for the **ZX-Unix** dialect of Sinclair BASIC. This document defines the grammar, keyword semantics, operator precedence, type system, and runtime behaviors. It serves as the single source of truth for cross-implementation compatibility across any target language or architecture.
+Standardized language specification for the **zxbasic** dialect of Sinclair BASIC. This document defines the grammar, keyword semantics, operator precedence, type system, and runtime behaviors. It serves as the single source of truth for cross-implementation compatibility across any target language or architecture.
 
 ---
 
