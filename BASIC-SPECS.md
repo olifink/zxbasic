@@ -116,6 +116,8 @@ Substrings use 1-based indices via the `TO` keyword within parentheses:
   * Resets the `DATA` reading cursor to the beginning of the program, or to the first `DATA` item at or following `line_number`.
 
 ### 4.5 Console Input/Output
+* **`CLS`**
+  * Clears the terminal screen and moves cursor to the home position (`\033[2J\033[H`), resetting output column counter to 0.
 * **`PRINT [<item> [separator] ...]`**
   * Output items include numbers, strings, and separator tokens:
     * `;` (Semicolon): Concatenates output with zero separation.

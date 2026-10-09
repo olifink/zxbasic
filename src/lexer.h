@@ -60,6 +60,7 @@ typedef enum {
     TOKEN_LIST,
     TOKEN_NEW,
     TOKEN_CLEAR,
+    TOKEN_CLS,
     TOKEN_SAVE,
     TOKEN_LOAD,
 

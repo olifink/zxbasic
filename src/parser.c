@@ -935,6 +935,15 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             runtime_clear(rt);
             return true;
 
+        case TOKEN_CLS:
+            lexer_next(l);
+            if (rt->out) {
+                fprintf(rt->out, "\033[2J\033[H");
+                fflush(rt->out);
+            }
+            rt->print_col = 0;
+            return true;
+
         case TOKEN_SAVE: {
             lexer_next(l);
             Value path_val = expr_eval(l, &rt->symtab, &rt->last_error);

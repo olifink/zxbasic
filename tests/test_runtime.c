@@ -168,11 +168,39 @@ static void test_save_and_load(void) {
     printf("test_save_and_load: PASS\n");
 }
 
+static void test_cls(void) {
+    Runtime rt;
+    runtime_init(&rt);
+    FILE *out = tmpfile();
+    rt.out = out;
+
+    runtime_process_input(&rt, "10 PRINT \"BEFORE\";", false);
+    runtime_process_input(&rt, "20 CLS", false);
+    runtime_process_input(&rt, "30 PRINT \"AFTER\";", false);
+
+    runtime_run(&rt, 0);
+    assert(rt.last_error.code == ERR_OK);
+
+    rewind(out);
+    char buf[256];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, out);
+    buf[n] = '\0';
+
+    assert(strstr(buf, "\033[2J\033[H") != NULL);
+    assert(strstr(buf, "BEFORE") != NULL);
+    assert(strstr(buf, "AFTER") != NULL);
+
+    fclose(out);
+    runtime_free(&rt);
+    printf("test_cls: PASS\n");
+}
+
 int main(void) {
     test_program_execution();
     test_subroutines();
     test_if_then();
     test_data_read();
     test_save_and_load();
+    test_cls();
     return 0;
 }

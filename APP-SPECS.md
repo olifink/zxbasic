@@ -105,7 +105,7 @@ The executable operates as an interactive shell executing or storing lines based
 
 ### 3.3 Statement Support (Phase Breakdown)
 
-* **Phase 1 (Bootstrap):** `LIST`, `RUN`, `NEW`, `PRINT` (strings and numeric literals), `LET` (assignment).
+* **Phase 1 (Bootstrap):** `LIST`, `RUN`, `NEW`, `CLEAR`, `CLS`, `PRINT` (strings and numeric literals), `LET` (assignment).
 * **Phase 2 (Control Flow):** `GOTO`, `IF ... THEN`, `STOP`, `INPUT`.
 * **Phase 3 (Loops & Subroutines):** `FOR ... TO ... STEP`, `NEXT`, `GOSUB`, `RETURN`, `DATA`, `READ`, `RESTORE`.
 * **Phase 4 (Persistence & Functions):**
