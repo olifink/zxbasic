@@ -1,0 +1,24 @@
+# Build directory & object files
+build/
+*.o
+*.a
+*.so
+
+# Executables
+zxbasic
+zx-unix
+test_*
+
+# Temporary files & core dumps
+core
+core.*
+vgcore.*
+*.tmp
+
+# Editor & IDE artifacts
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.DS_Store
