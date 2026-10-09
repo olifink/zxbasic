@@ -66,6 +66,10 @@ const char *token_type_name(TokenType t) {
         case TOKEN_CLS: return "CLS";
         case TOKEN_SAVE: return "SAVE";
         case TOKEN_LOAD: return "LOAD";
+        case TOKEN_EDIT: return "EDIT";
+        case TOKEN_AUTO: return "AUTO";
+        case TOKEN_EXIT: return "EXIT";
+        case TOKEN_RENUM: return "RENUM";
         case TOKEN_ABS: return "ABS";
         case TOKEN_ACS: return "ACS";
         case TOKEN_ASN: return "ASN";
@@ -150,6 +154,10 @@ static TokenType match_keyword(const char *upper) {
     if (strcmp(upper, "CLS") == 0) return TOKEN_CLS;
     if (strcmp(upper, "SAVE") == 0) return TOKEN_SAVE;
     if (strcmp(upper, "LOAD") == 0) return TOKEN_LOAD;
+    if (strcmp(upper, "EDIT") == 0) return TOKEN_EDIT;
+    if (strcmp(upper, "AUTO") == 0) return TOKEN_AUTO;
+    if (strcmp(upper, "EXIT") == 0) return TOKEN_EXIT;
+    if (strcmp(upper, "RENUM") == 0) return TOKEN_RENUM;
 
     if (strcmp(upper, "AND") == 0) return TOKEN_AND;
     if (strcmp(upper, "OR") == 0) return TOKEN_OR;

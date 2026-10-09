@@ -964,6 +964,99 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             return ok;
         }
 
+        case TOKEN_EDIT: {
+            if (rt->is_running) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+            Value line_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&line_val)) { rt->last_error.code = ERR_NONSENSE; return false; }
+            uint16_t target_line = (uint16_t)floor(line_val.as.num);
+            ssize_t idx = program_find_index(&rt->program, target_line);
+            if (idx < 0) {
+                rt->last_error.code = ERR_INTEGER_RANGE;
+                return false;
+            }
+            const ProgramLine *pl = program_get_line(&rt->program, (size_t)idx);
+            char buf[4096];
+            snprintf(buf, sizeof(buf), "%u %s", (unsigned int)pl->line_no, pl->source);
+            free(rt->edit_prefill_buffer);
+            rt->edit_prefill_buffer = strdup(buf);
+            return true;
+        }
+
+        case TOKEN_AUTO: {
+            if (rt->is_running) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+            uint16_t start_line = 10;
+            uint16_t step = 10;
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value sv = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&sv)) { rt->last_error.code = ERR_NONSENSE; return false; }
+                start_line = (uint16_t)floor(sv.as.num);
+
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                    Value step_v = expr_eval(l, &rt->symtab, &rt->last_error);
+                    if (rt->last_error.code != ERR_OK) return false;
+                    if (!value_is_num(&step_v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+                    step = (uint16_t)floor(step_v.as.num);
+                }
+            }
+            if (start_line < MIN_LINE_NO || start_line > MAX_LINE_NO || step < 1) {
+                rt->last_error.code = ERR_INTEGER_RANGE;
+                return false;
+            }
+            rt->auto_mode = true;
+            rt->auto_current_line = start_line;
+            rt->auto_step = step;
+            return true;
+        }
+
+        case TOKEN_RENUM: {
+            if (rt->is_running) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+            uint16_t start_line = 10;
+            uint16_t step = 10;
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value sv = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&sv)) { rt->last_error.code = ERR_NONSENSE; return false; }
+                start_line = (uint16_t)floor(sv.as.num);
+
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                    Value step_v = expr_eval(l, &rt->symtab, &rt->last_error);
+                    if (rt->last_error.code != ERR_OK) return false;
+                    if (!value_is_num(&step_v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+                    step = (uint16_t)floor(step_v.as.num);
+                }
+            }
+            return program_renumber(&rt->program, start_line, step, &rt->last_error, rt->out);
+        }
+
+        case TOKEN_EXIT: {
+            lexer_next(l);
+            int code = 0;
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; return false; }
+                code = (int)floor(cv.as.num);
+            }
+            exit(code);
+            return true;
+        }
+
         default:
             rt->last_error.code = ERR_NONSENSE;
             return false;

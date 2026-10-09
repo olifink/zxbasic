@@ -147,3 +147,145 @@ void program_list(const Program *p, uint16_t start_line, FILE *out) {
         fprintf(out, "%u %s\n", (unsigned int)p->lines[i].line_no, p->lines[i].source);
     }
 }
+
+#include "lexer.h"
+#include <math.h>
+#include <ctype.h>
+
+typedef struct {
+    uint16_t old_line;
+    uint16_t new_line;
+} LineMap;
+
+static char *patch_line_branch_targets(const char *source, uint16_t old_line_no, size_t count, const LineMap *map, FILE *warn_out) {
+    Lexer l;
+    lexer_init(&l, source);
+
+    size_t cap = strlen(source) + 128;
+    char *out = malloc(cap);
+    if (!out) {
+        token_free(&l.current);
+        return strdup(source);
+    }
+    size_t out_len = 0;
+    size_t src_pos = 0;
+
+    TokenType prev_type = TOKEN_EOF;
+
+    while (l.current.type != TOKEN_EOF) {
+        if (l.current.type == TOKEN_NUMBER) {
+            if (prev_type == TOKEN_GOTO || prev_type == TOKEN_GOSUB ||
+                prev_type == TOKEN_RESTORE || prev_type == TOKEN_THEN) {
+                
+                double num_val = l.current.num_val;
+                if (floor(num_val) == num_val && num_val >= MIN_LINE_NO && num_val <= MAX_LINE_NO) {
+                    uint16_t target = (uint16_t)num_val;
+                    ssize_t mapped_idx = -1;
+                    for (size_t k = 0; k < count; k++) {
+                        if (map[k].old_line == target) {
+                            mapped_idx = (ssize_t)k;
+                            break;
+                        }
+                    }
+
+                    size_t start_col = (l.current.col > 0) ? l.current.col - 1 : 0;
+                    if (start_col > src_pos) {
+                        size_t chunk = start_col - src_pos;
+                        while (out_len + chunk >= cap) { cap *= 2; out = realloc(out, cap); }
+                        memcpy(out + out_len, source + src_pos, chunk);
+                        out_len += chunk;
+                    }
+
+                    size_t end_col = start_col;
+                    while (source[end_col] != '\0' && (isdigit((unsigned char)source[end_col]) || source[end_col] == '.')) {
+                        end_col++;
+                    }
+
+                    if (mapped_idx >= 0) {
+                        char num_buf[32];
+                        snprintf(num_buf, sizeof(num_buf), "%u", (unsigned int)map[mapped_idx].new_line);
+                        size_t nlen = strlen(num_buf);
+                        while (out_len + nlen >= cap) { cap *= 2; out = realloc(out, cap); }
+                        memcpy(out + out_len, num_buf, nlen);
+                        out_len += nlen;
+                    } else {
+                        if (warn_out) {
+                            fprintf(warn_out, "Warning: Line reference %u not found at line %u\n", (unsigned int)target, (unsigned int)old_line_no);
+                        }
+                        size_t nlen = end_col - start_col;
+                        while (out_len + nlen >= cap) { cap *= 2; out = realloc(out, cap); }
+                        memcpy(out + out_len, source + start_col, nlen);
+                        out_len += nlen;
+                    }
+
+                    src_pos = end_col;
+                }
+            }
+        }
+
+        prev_type = l.current.type;
+        lexer_next(&l);
+    }
+
+    token_free(&l.current);
+
+    size_t rem = strlen(source + src_pos);
+    while (out_len + rem >= cap) { cap = out_len + rem + 1; out = realloc(out, cap); }
+    memcpy(out + out_len, source + src_pos, rem);
+    out_len += rem;
+    out[out_len] = '\0';
+
+    return out;
+}
+
+bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError *err, FILE *warn_out) {
+    if (!p || p->count == 0) return true;
+
+    if (start_line == 0) start_line = 10;
+    if (step == 0) step = 10;
+
+    if (start_line < MIN_LINE_NO || start_line > MAX_LINE_NO || step < 1) {
+        if (err) err->code = ERR_INTEGER_RANGE;
+        return false;
+    }
+
+    if (p->count > 1) {
+        uint64_t max_new = (uint64_t)start_line + (uint64_t)(p->count - 1) * (uint64_t)step;
+        if (max_new > MAX_LINE_NO) {
+            if (err) err->code = ERR_INTEGER_RANGE;
+            return false;
+        }
+    }
+
+    LineMap *map = malloc(p->count * sizeof(LineMap));
+    if (!map) {
+        if (err) err->code = ERR_OUT_OF_MEMORY;
+        return false;
+    }
+
+    for (size_t i = 0; i < p->count; i++) {
+        map[i].old_line = p->lines[i].line_no;
+        map[i].new_line = (uint16_t)(start_line + i * step);
+    }
+
+    char **new_sources = malloc(p->count * sizeof(char *));
+    if (!new_sources) {
+        free(map);
+        if (err) err->code = ERR_OUT_OF_MEMORY;
+        return false;
+    }
+
+    for (size_t i = 0; i < p->count; i++) {
+        new_sources[i] = patch_line_branch_targets(p->lines[i].source, p->lines[i].line_no, p->count, map, warn_out);
+    }
+
+    for (size_t i = 0; i < p->count; i++) {
+        p->lines[i].line_no = map[i].new_line;
+        free(p->lines[i].source);
+        p->lines[i].source = new_sources[i];
+    }
+
+    free(new_sources);
+    free(map);
+    return true;
+}

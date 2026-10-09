@@ -7,6 +7,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "normalize.h"
+
 void runtime_init(Runtime *rt) {
     memset(rt, 0, sizeof(*rt));
     program_init(&rt->program);
@@ -17,6 +19,10 @@ void runtime_init(Runtime *rt) {
     rt->last_error.code = ERR_OK;
     rt->last_error.line_no = -1;
     rt->last_error.stmt_index = 0;
+    rt->auto_mode = false;
+    rt->auto_current_line = 10;
+    rt->auto_step = 10;
+    rt->edit_prefill_buffer = NULL;
 }
 
 void runtime_clear(Runtime *rt) {
@@ -34,12 +40,16 @@ void runtime_clear(Runtime *rt) {
     rt->last_error.code = ERR_OK;
     rt->last_error.line_no = -1;
     rt->last_error.stmt_index = 0;
+    rt->auto_mode = false;
+    free(rt->edit_prefill_buffer);
+    rt->edit_prefill_buffer = NULL;
 }
 
 void runtime_free(Runtime *rt) {
     if (!rt) return;
     program_free(&rt->program);
     symtab_free(&rt->symtab);
+    free(rt->edit_prefill_buffer);
     memset(rt, 0, sizeof(*rt));
 }
 
@@ -238,15 +248,30 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
             // Delete line
             program_delete(&rt->program, (uint16_t)line_no);
         } else {
-            // Insert or replace line
-            // Strip trailing \r, \n
-            char *copy = strdup(body);
-            size_t clen = strlen(copy);
-            while (clen > 0 && (copy[clen - 1] == '\r' || copy[clen - 1] == '\n')) {
-                copy[--clen] = '\0';
+            // Pre-storage filter passes:
+            // 1. Keyword Auto-Capitalization
+            char *normalized = normalize_keywords(body);
+            if (!normalized) return;
+
+            size_t clen = strlen(normalized);
+            while (clen > 0 && (normalized[clen - 1] == '\r' || normalized[clen - 1] == '\n')) {
+                normalized[--clen] = '\0';
             }
-            program_insert_or_replace(&rt->program, (uint16_t)line_no, copy);
-            free(copy);
+
+            // 2. Syntax Verification
+            size_t err_col = 0;
+            if (!syntax_validate_line(normalized, &err_col)) {
+                // Reject line, do not touch existing program store
+                char err_buf[128];
+                snprintf(err_buf, sizeof(err_buf), "C Nonsense in BASIC, %u:%u", (unsigned int)line_no, (unsigned int)err_col);
+                fprintf(rt->out, "%s\n", err_buf);
+                free(normalized);
+                return;
+            }
+
+            // Ingest validated line into program store
+            program_insert_or_replace(&rt->program, (uint16_t)line_no, normalized);
+            free(normalized);
         }
     } else {
         // Immediate mode execution

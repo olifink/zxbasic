@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
 #include "runtime.h"
+#include "linenoise.h"
 
 int main(int argc, char **argv) {
     Runtime rt;
@@ -31,18 +33,61 @@ int main(int argc, char **argv) {
         printf("Type commands or enter numbered lines. RUN to execute.\n\n");
     }
 
-    char line_buf[2048];
     while (true) {
+        char prompt[64];
+        if (rt.auto_mode) {
+            bool exists = (program_find_index(&rt.program, rt.auto_current_line) >= 0);
+            snprintf(prompt, sizeof(prompt), "%u%s ", (unsigned int)rt.auto_current_line, exists ? "*" : "");
+        } else {
+            snprintf(prompt, sizeof(prompt), "> ");
+        }
+
+        char *line = NULL;
         if (is_interactive) {
-            printf("> ");
-            fflush(stdout);
+            if (rt.edit_prefill_buffer) {
+                linenoisePreloadBuffer(rt.edit_prefill_buffer);
+                free(rt.edit_prefill_buffer);
+                rt.edit_prefill_buffer = NULL;
+            }
+            line = linenoise(prompt);
+            if (!line) break; // EOF or Ctrl+C
+            if (line[0] != '\0') {
+                linenoiseHistoryAdd(line);
+            }
+        } else {
+            char buf[4096];
+            if (!fgets(buf, sizeof(buf), stdin)) {
+                break;
+            }
+            size_t blen = strlen(buf);
+            while (blen > 0 && (buf[blen - 1] == '\r' || buf[blen - 1] == '\n')) {
+                buf[--blen] = '\0';
+            }
+            line = strdup(buf);
         }
 
-        if (!fgets(line_buf, sizeof(line_buf), stdin)) {
-            break; // EOF
+        if (rt.auto_mode) {
+            const char *p = line;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (*p == '\0') {
+                rt.auto_mode = false;
+                free(line);
+                continue;
+            }
+
+            char full_line[4200];
+            snprintf(full_line, sizeof(full_line), "%u %s", (unsigned int)rt.auto_current_line, p);
+            runtime_process_input(&rt, full_line, is_interactive);
+            if ((uint64_t)rt.auto_current_line + rt.auto_step > MAX_LINE_NO) {
+                rt.auto_mode = false;
+            } else {
+                rt.auto_current_line += rt.auto_step;
+            }
+        } else {
+            runtime_process_input(&rt, line, is_interactive);
         }
 
-        runtime_process_input(&rt, line_buf, is_interactive);
+        free(line);
     }
 
     runtime_free(&rt);

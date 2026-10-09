@@ -63,6 +63,10 @@ typedef enum {
     TOKEN_CLS,
     TOKEN_SAVE,
     TOKEN_LOAD,
+    TOKEN_EDIT,
+    TOKEN_AUTO,
+    TOKEN_EXIT,
+    TOKEN_RENUM,
 
     // Built-in functions
     TOKEN_ABS,

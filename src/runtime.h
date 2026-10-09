@@ -60,6 +60,12 @@ typedef struct {
     // Diagnostic error
     BasicError last_error;
 
+    // Interactive features (AUTO and EDIT)
+    bool auto_mode;
+    uint16_t auto_current_line;
+    uint16_t auto_step;
+    char *edit_prefill_buffer;
+
     // Console output tracking
     int print_col;
     FILE *out;
