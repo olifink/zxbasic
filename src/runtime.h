@@ -5,9 +5,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <signal.h>
 #include "program.h"
 #include "symtab.h"
 #include "error.h"
+
+extern volatile sig_atomic_t g_interrupted;
+void setup_signal_handlers(void);
 
 #define MAX_CALL_STACK 256
 #define MAX_FOR_STACK 64

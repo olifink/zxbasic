@@ -139,7 +139,17 @@ static int edit_line(int fd, const char *prompt, char *buf, size_t maxlen) {
     while (true) {
         char c;
         ssize_t nread = read(fd, &c, 1);
-        if (nread <= 0) return (int)len;
+        if (nread <= 0) {
+            if (nread < 0 && (errno == EINTR || errno == EAGAIN)) {
+                errno = EAGAIN;
+                return -1;
+            }
+            if (len == 0) {
+                errno = 0;
+                return -1;
+            }
+            return (int)len;
+        }
 
         if (c == '\r' || c == '\n') {
             return (int)len;
@@ -147,7 +157,10 @@ static int edit_line(int fd, const char *prompt, char *buf, size_t maxlen) {
             errno = EAGAIN;
             return -1;
         } else if (c == 4) { // Ctrl+D
-            if (len == 0) return -1;
+            if (len == 0) {
+                errno = 0;
+                return -1;
+            }
             // Delete character under cursor
             if (pos < len) {
                 memmove(buf + pos, buf + pos + 1, len - pos);
@@ -250,6 +263,7 @@ static int edit_line(int fd, const char *prompt, char *buf, size_t maxlen) {
 }
 
 char *linenoise(const char *prompt) {
+    errno = 0;
     if (!isatty(STDIN_FILENO)) {
         char buf[LINENOISE_MAX_LINE];
         if (!fgets(buf, sizeof(buf), stdin)) return NULL;

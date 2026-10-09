@@ -7,6 +7,7 @@
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
+#include <errno.h>
 
 static void print_chars(Runtime *rt, const char *s, size_t len) {
     if (!rt || !rt->out || !s || len == 0) return;
@@ -362,6 +363,14 @@ static bool parse_input(Lexer *l, Runtime *rt) {
 
     char line_buf[1024];
     if (!fgets(line_buf, sizeof(line_buf), rt->in ? rt->in : stdin)) {
+        if (g_interrupted || errno == EINTR) {
+            g_interrupted = 0;
+            rt->stop_requested = true;
+            rt->last_error.code = ERR_STOP;
+            rt->last_error.custom_msg = "BREAK into program";
+            free(var_name);
+            return false;
+        }
         line_buf[0] = '\0';
     }
 
@@ -860,6 +869,7 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
         case TOKEN_STOP:
             rt->stop_requested = true;
             rt->last_error.code = ERR_STOP;
+            rt->last_error.custom_msg = NULL;
             return false;
 
         case TOKEN_IF: {

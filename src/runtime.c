@@ -9,6 +9,22 @@
 
 #include "normalize.h"
 
+volatile sig_atomic_t g_interrupted = 0;
+
+static void sigint_handler(int sig) {
+    (void)sig;
+    g_interrupted = 1;
+}
+
+void setup_signal_handlers(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+}
+
 void runtime_init(Runtime *rt) {
     memset(rt, 0, sizeof(*rt));
     program_init(&rt->program);
@@ -17,6 +33,7 @@ void runtime_init(Runtime *rt) {
     rt->in = stdin;
     rt->print_col = 0;
     rt->last_error.code = ERR_OK;
+    rt->last_error.custom_msg = NULL;
     rt->last_error.line_no = -1;
     rt->last_error.stmt_index = 0;
     rt->auto_mode = false;
@@ -38,6 +55,7 @@ void runtime_clear(Runtime *rt) {
     rt->data_initialized = false;
     rt->print_col = 0;
     rt->last_error.code = ERR_OK;
+    rt->last_error.custom_msg = NULL;
     rt->last_error.line_no = -1;
     rt->last_error.stmt_index = 0;
     rt->auto_mode = false;
@@ -74,6 +92,7 @@ void runtime_reset_for_run(Runtime *rt, uint16_t start_line) {
     rt->cur_offset = 0;
     rt->print_col = 0;
     rt->last_error.code = ERR_OK;
+    rt->last_error.custom_msg = NULL;
     rt->last_error.line_no = -1;
     rt->last_error.stmt_index = 0;
 }
@@ -90,6 +109,14 @@ void runtime_execute_line(Runtime *rt, const char *line_text, int32_t line_no) {
         rt->last_error.line_no = line_no;
         rt->last_error.stmt_index = rt->cur_stmt_idx;
         rt->jump_requested = false;
+
+        if (g_interrupted) {
+            g_interrupted = 0;
+            rt->stop_requested = true;
+            rt->last_error.code = ERR_STOP;
+            rt->last_error.custom_msg = "BREAK into program";
+            break;
+        }
 
         size_t next_offset = l.cursor;
         if (!parser_execute_statement(&l, rt, next_offset, &skip_line)) {
@@ -142,6 +169,18 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
         rt->last_error.line_no = (int32_t)line->line_no;
         rt->last_error.stmt_index = rt->cur_stmt_idx;
 
+        if (g_interrupted) {
+            g_interrupted = 0;
+            rt->stop_requested = true;
+            rt->last_error.code = ERR_STOP;
+            rt->last_error.custom_msg = "BREAK into program";
+            char err_buf[128];
+            error_format(&rt->last_error, err_buf, sizeof(err_buf));
+            fprintf(rt->out, "\n%s\n", err_buf);
+            rt->is_running = false;
+            return;
+        }
+
         const char *src = line->source + rt->cur_offset;
         rt->cur_offset = 0;
 
@@ -151,8 +190,22 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
         bool jumped = false;
 
         while (l.current.type != TOKEN_EOF && !skip_line && rt->is_running) {
+            rt->last_error.line_no = (int32_t)line->line_no;
             rt->last_error.stmt_index = rt->cur_stmt_idx;
             rt->jump_requested = false;
+
+            if (g_interrupted) {
+                g_interrupted = 0;
+                rt->stop_requested = true;
+                rt->last_error.code = ERR_STOP;
+                rt->last_error.custom_msg = "BREAK into program";
+                char err_buf[128];
+                error_format(&rt->last_error, err_buf, sizeof(err_buf));
+                fprintf(rt->out, "\n%s\n", err_buf);
+                rt->is_running = false;
+                token_free(&l.current);
+                return;
+            }
 
             size_t next_offset = l.cursor;
             if (!parser_execute_statement(&l, rt, next_offset, &skip_line)) {
@@ -276,6 +329,7 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
     } else {
         // Immediate mode execution
         rt->last_error.code = ERR_OK;
+        rt->last_error.custom_msg = NULL;
         rt->last_error.line_no = -1;
         rt->last_error.stmt_index = 0;
 

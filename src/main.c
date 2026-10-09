@@ -5,10 +5,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <errno.h>
 #include "runtime.h"
 #include "linenoise.h"
 
 int main(int argc, char **argv) {
+    setup_signal_handlers();
     Runtime rt;
     runtime_init(&rt);
 
@@ -50,13 +52,34 @@ int main(int argc, char **argv) {
                 rt.edit_prefill_buffer = NULL;
             }
             line = linenoise(prompt);
-            if (!line) break; // EOF or Ctrl+C
+            if (!line) {
+                if (errno == EAGAIN || g_interrupted) {
+                    g_interrupted = 0;
+                    if (rt.auto_mode) {
+                        rt.auto_mode = false;
+                    }
+                    if (rt.edit_prefill_buffer) {
+                        free(rt.edit_prefill_buffer);
+                        rt.edit_prefill_buffer = NULL;
+                    }
+                    continue;
+                }
+                break; // EOF
+            }
             if (line[0] != '\0') {
                 linenoiseHistoryAdd(line);
             }
         } else {
             char buf[4096];
             if (!fgets(buf, sizeof(buf), stdin)) {
+                if (g_interrupted || errno == EINTR) {
+                    g_interrupted = 0;
+                    clearerr(stdin);
+                    if (rt.auto_mode) {
+                        rt.auto_mode = false;
+                    }
+                    continue;
+                }
                 break;
             }
             size_t blen = strlen(buf);
