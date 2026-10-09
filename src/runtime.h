@@ -91,7 +91,8 @@ void runtime_execute_line(Runtime *rt, const char *line_text, int32_t line_no);
 void runtime_run(Runtime *rt, uint16_t start_line);
 
 // Process a single REPL or script input line (storing numbered lines, executing direct lines)
-void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive);
+// Returns true on success, false on error/rejection.
+bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive);
 
 // Persistence
 bool runtime_save(Runtime *rt, const char *path);

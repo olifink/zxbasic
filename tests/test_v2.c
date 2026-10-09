@@ -162,6 +162,62 @@ static void test_edit_and_auto(void) {
     printf("test_edit_and_auto: PASS\n");
 }
 
+static void test_auto_error_retry(void) {
+    Runtime rt;
+    runtime_init(&rt);
+    FILE *out = tmpfile();
+    rt.out = out;
+
+    // Start AUTO mode at line 10 with step 10
+    bool ok = runtime_process_input(&rt, "AUTO 10, 10", false);
+    assert(ok);
+    assert(rt.auto_mode == true);
+    assert(rt.auto_current_line == 10);
+    assert(rt.auto_step == 10);
+
+    // Simulate entry of an invalid statement in AUTO mode
+    // (e.g. user enters `FOR i = 1 10` - missing TO)
+    const char *bad_input = "FOR i = 1 10";
+    char full_line[256];
+    snprintf(full_line, sizeof(full_line), "%u %s", (unsigned int)rt.auto_current_line, bad_input);
+    ok = runtime_process_input(&rt, full_line, false);
+    assert(!ok); // Syntax error rejected
+
+    // Verify error code and program memory
+    assert(rt.last_error.code == ERR_NONSENSE);
+    assert(program_find_index(&rt.program, 10) < 0); // Not stored
+
+    // In AUTO loop: when !ok, prefill buffer and do not advance line
+    if (!ok) {
+        free(rt.edit_prefill_buffer);
+        rt.edit_prefill_buffer = strdup(bad_input);
+    } else {
+        rt.auto_current_line += rt.auto_step;
+    }
+
+    assert(rt.auto_current_line == 10); // Still 10!
+    assert(rt.edit_prefill_buffer != NULL);
+    assert(strcmp(rt.edit_prefill_buffer, "FOR i = 1 10") == 0); // Presented again
+
+    // User fixes it to valid syntax: "FOR i = 1 TO 10"
+    free(rt.edit_prefill_buffer);
+    rt.edit_prefill_buffer = NULL;
+    const char *fixed_input = "FOR i = 1 TO 10";
+    snprintf(full_line, sizeof(full_line), "%u %s", (unsigned int)rt.auto_current_line, fixed_input);
+    ok = runtime_process_input(&rt, full_line, false);
+    assert(ok);
+    if (ok) {
+        rt.auto_current_line += rt.auto_step;
+    }
+
+    assert(rt.auto_current_line == 20); // Now advanced to 20!
+    assert(program_find_index(&rt.program, 10) >= 0); // Stored in memory
+
+    fclose(out);
+    runtime_free(&rt);
+    printf("test_auto_error_retry: PASS\n");
+}
+
 static void test_ctrl_c_break_program(void) {
     Runtime rt;
     runtime_init(&rt);
@@ -291,6 +347,7 @@ int main(void) {
     test_ingestion_gating();
     test_renum();
     test_edit_and_auto();
+    test_auto_error_retry();
     test_ctrl_c_break_program();
     test_ctrl_c_break_input();
     test_ctrl_c_break_direct();

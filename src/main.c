@@ -94,17 +94,26 @@ int main(int argc, char **argv) {
             while (*p && isspace((unsigned char)*p)) p++;
             if (*p == '\0') {
                 rt.auto_mode = false;
+                free(rt.edit_prefill_buffer);
+                rt.edit_prefill_buffer = NULL;
                 free(line);
                 continue;
             }
 
             char full_line[4200];
             snprintf(full_line, sizeof(full_line), "%u %s", (unsigned int)rt.auto_current_line, p);
-            runtime_process_input(&rt, full_line, is_interactive);
-            if ((uint64_t)rt.auto_current_line + rt.auto_step > MAX_LINE_NO) {
-                rt.auto_mode = false;
+            bool ok = runtime_process_input(&rt, full_line, is_interactive);
+            if (!ok) {
+                // Syntax error or rejection during AUTO entry:
+                // Present this line again so that it can be fixed
+                free(rt.edit_prefill_buffer);
+                rt.edit_prefill_buffer = strdup(p);
             } else {
-                rt.auto_current_line += rt.auto_step;
+                if ((uint64_t)rt.auto_current_line + rt.auto_step > MAX_LINE_NO) {
+                    rt.auto_mode = false;
+                } else {
+                    rt.auto_current_line += rt.auto_step;
+                }
             }
         } else {
             runtime_process_input(&rt, line, is_interactive);

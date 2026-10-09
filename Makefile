@@ -2,6 +2,9 @@ CC ?= gcc
 CFLAGS ?= -std=c99 -Wall -Wextra -pedantic -O2 -g
 LDFLAGS ?= -lm
 
+RELEASE_CFLAGS ?= -std=c99 -Wall -Wextra -pedantic -Os -DNDEBUG
+RELEASE_LDFLAGS ?= -lm -s
+
 SRC_DIR = src
 TEST_DIR = tests
 BUILD_DIR = build
@@ -53,7 +56,11 @@ test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN)
 	./$(TEST_V2_BIN)
 	@echo "All tests passed!"
 
+release:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="$(RELEASE_CFLAGS)" LDFLAGS="$(RELEASE_LDFLAGS)" $(TARGET)
+
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
 
-.PHONY: all test clean
+.PHONY: all test clean release

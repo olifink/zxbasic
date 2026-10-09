@@ -273,13 +273,13 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
     rt->is_running = false;
 }
 
-void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) {
-    if (!rt || !raw_line) return;
+bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) {
+    if (!rt || !raw_line) return false;
 
     // Skip leading whitespace
     const char *p = raw_line;
     while (*p && isspace((unsigned char)*p)) p++;
-    if (*p == '\0') return;
+    if (*p == '\0') return true;
 
     // Check if line starts with line number
     if (isdigit((unsigned char)*p)) {
@@ -291,7 +291,7 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
             char buf[128];
             error_format(&rt->last_error, buf, sizeof(buf));
             fprintf(rt->out, "%s\n", buf);
-            return;
+            return false;
         }
 
         const char *body = endptr;
@@ -300,11 +300,13 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
         if (*body == '\0') {
             // Delete line
             program_delete(&rt->program, (uint16_t)line_no);
+            rt->last_error.code = ERR_OK;
+            return true;
         } else {
             // Pre-storage filter passes:
             // 1. Keyword Auto-Capitalization
             char *normalized = normalize_keywords(body);
-            if (!normalized) return;
+            if (!normalized) return false;
 
             size_t clen = strlen(normalized);
             while (clen > 0 && (normalized[clen - 1] == '\r' || normalized[clen - 1] == '\n')) {
@@ -315,16 +317,21 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
             size_t err_col = 0;
             if (!syntax_validate_line(normalized, &err_col)) {
                 // Reject line, do not touch existing program store
+                rt->last_error.code = ERR_NONSENSE;
+                rt->last_error.line_no = (int32_t)line_no;
+                rt->last_error.stmt_index = (int32_t)err_col;
                 char err_buf[128];
                 snprintf(err_buf, sizeof(err_buf), "C Nonsense in BASIC, %u:%u", (unsigned int)line_no, (unsigned int)err_col);
                 fprintf(rt->out, "%s\n", err_buf);
                 free(normalized);
-                return;
+                return false;
             }
 
             // Ingest validated line into program store
             program_insert_or_replace(&rt->program, (uint16_t)line_no, normalized);
             free(normalized);
+            rt->last_error.code = ERR_OK;
+            return true;
         }
     } else {
         // Immediate mode execution
@@ -349,6 +356,7 @@ void runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
                 fprintf(rt->out, "%s\n", buf);
             }
         }
+        return (rt->last_error.code == ERR_OK);
     }
 }
 
