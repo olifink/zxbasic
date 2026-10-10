@@ -31,6 +31,7 @@ TEST_EXPR_BIN = $(BUILD_DIR)/test_expr
 TEST_RUNTIME_BIN = $(BUILD_DIR)/test_runtime
 TEST_V2_BIN = $(BUILD_DIR)/test_v2
 TEST_COLORS_BIN = $(BUILD_DIR)/test_colors
+TEST_DEBUG_BIN = $(BUILD_DIR)/test_debug
 
 CORE_OBJS = $(BUILD_DIR)/program.o $(BUILD_DIR)/error.o $(BUILD_DIR)/value.o $(BUILD_DIR)/symtab.o $(BUILD_DIR)/sysvars.o $(BUILD_DIR)/console.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/expr.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/runtime.o $(BUILD_DIR)/normalize.o $(BUILD_DIR)/linenoise.o
 
@@ -49,7 +50,10 @@ $(TEST_V2_BIN): $(TEST_DIR)/test_v2.c $(CORE_OBJS) | $(BUILD_DIR)
 $(TEST_COLORS_BIN): $(TEST_DIR)/test_colors.c $(CORE_OBJS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TEST_COLORS_BIN)
+$(TEST_DEBUG_BIN): $(TEST_DIR)/test_debug.c $(CORE_OBJS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TEST_COLORS_BIN) $(TEST_DEBUG_BIN)
 	@echo "Running test_store..."
 	./$(TEST_STORE_BIN)
 	@echo "Running test_expr..."
@@ -60,6 +64,8 @@ test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TE
 	./$(TEST_V2_BIN)
 	@echo "Running test_colors..."
 	./$(TEST_COLORS_BIN)
+	@echo "Running test_debug..."
+	./$(TEST_DEBUG_BIN)
 	@echo "All tests passed!"
 
 release:

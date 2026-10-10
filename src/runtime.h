@@ -17,6 +17,7 @@ void setup_signal_handlers(void);
 
 #define MAX_CALL_STACK 256
 #define MAX_FOR_STACK 64
+#define MAX_BREAKPOINTS 64
 
 typedef struct {
     size_t line_idx;
@@ -75,6 +76,14 @@ typedef struct Runtime {
     // System variables
     SysVarTable sysvars;
 
+    // Continuation & Debugging state
+    bool can_continue;
+    size_t cont_line_idx;
+    int cont_stmt_idx;
+    uint16_t temp_stop_line;
+    uint16_t breakpoints[MAX_BREAKPOINTS];
+    size_t breakpoint_count;
+
     // Console output tracking & terminal attributes
     int print_col;
     ConsoleTermAttrs term_attrs;
@@ -87,6 +96,13 @@ typedef struct Runtime {
 void runtime_init(Runtime *rt);
 void runtime_clear(Runtime *rt);
 void runtime_free(Runtime *rt);
+
+// Breakpoints & Debugging
+bool runtime_add_breakpoint(Runtime *rt, uint16_t line_no);
+bool runtime_has_breakpoint(const Runtime *rt, uint16_t line_no);
+void runtime_clear_breakpoints(Runtime *rt);
+bool runtime_continue(Runtime *rt, uint16_t temp_stop_line);
+void runtime_vars(Runtime *rt);
 
 // Resets runtime state for RUN
 void runtime_reset_for_run(Runtime *rt, uint16_t start_line);

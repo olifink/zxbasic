@@ -57,9 +57,18 @@ static void print_newline(Runtime *rt) {
 
 static void print_tab(Runtime *rt) {
     if (!rt || !rt->out) return;
+    int64_t scr_cols = 32;
+    sysvar_get_int(&rt->sysvars, "SCR_COLS", &scr_cols);
+    if (scr_cols <= 0) scr_cols = 32;
+
     int next_tab = ((rt->print_col / 16) + 1) * 16;
-    while (rt->print_col < next_tab) {
-        print_chars(rt, " ", 1);
+    if (next_tab >= (int)scr_cols) {
+        print_newline(rt);
+    } else {
+        int spaces = next_tab - rt->print_col;
+        for (int i = 0; i < spaces; i++) {
+            print_chars(rt, " ", 1);
+        }
     }
 }
 
@@ -1058,6 +1067,7 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             return true;
 
         case TOKEN_STOP:
+            lexer_next(l);
             rt->stop_requested = true;
             rt->last_error.code = ERR_STOP;
             rt->last_error.custom_msg = NULL;
@@ -1135,6 +1145,74 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             lexer_next(l);
             runtime_clear(rt);
             return true;
+
+        case TOKEN_VARS:
+            lexer_next(l);
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            runtime_vars(rt);
+            return true;
+
+        case TOKEN_CONTINUE: {
+            lexer_next(l);
+            uint16_t target_line = 0;
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&v)) {
+                    value_free(&v);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d = v.as.num;
+                value_free(&v);
+                if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                target_line = (uint16_t)d;
+            }
+            return runtime_continue(rt, target_line);
+        }
+
+        case TOKEN_BREAK: {
+            lexer_next(l);
+            if (l->current.type == TOKEN_EOF || l->current.type == TOKEN_COLON) {
+                rt->stop_requested = true;
+                rt->last_error.code = ERR_STOP;
+                rt->last_error.custom_msg = "Breakpoint reached";
+                return false;
+            }
+            while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&v)) {
+                    value_free(&v);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d = v.as.num;
+                value_free(&v);
+                if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                uint16_t line_no = (uint16_t)d;
+                if (program_find_index(&rt->program, line_no) < 0) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                runtime_add_breakpoint(rt, line_no);
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                } else {
+                    break;
+                }
+            }
+            return true;
+        }
 
         case TOKEN_CLS:
             lexer_next(l);

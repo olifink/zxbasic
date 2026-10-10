@@ -195,6 +195,32 @@ static void test_cls(void) {
     printf("test_cls: PASS\n");
 }
 
+static void test_print_comma_tabs(void) {
+    Runtime rt;
+    runtime_init(&rt);
+    FILE *out = tmpfile();
+    rt.out = out;
+
+    runtime_process_input(&rt, "10 FOR i = 0 TO 10", false);
+    runtime_process_input(&rt, "20 PRINT i,", false);
+    runtime_process_input(&rt, "30 NEXT i", false);
+
+    runtime_run(&rt, 0);
+    assert(rt.last_error.code == ERR_OK);
+
+    rewind(out);
+    char buf[512];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, out);
+    buf[n] = '\0';
+
+    assert(strstr(buf, "0") != NULL);
+    assert(strstr(buf, "10") != NULL);
+
+    fclose(out);
+    runtime_free(&rt);
+    printf("test_print_comma_tabs: PASS\n");
+}
+
 int main(void) {
     test_program_execution();
     test_subroutines();
@@ -202,5 +228,6 @@ int main(void) {
     test_data_read();
     test_save_and_load();
     test_cls();
+    test_print_comma_tabs();
     return 0;
 }

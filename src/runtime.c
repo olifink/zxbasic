@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 
 #include "normalize.h"
 
@@ -72,6 +73,13 @@ void runtime_clear(Runtime *rt) {
     rt->auto_mode = false;
     free(rt->edit_prefill_buffer);
     rt->edit_prefill_buffer = NULL;
+
+    // Reset debug and continuation state
+    rt->can_continue = false;
+    rt->cont_line_idx = 0;
+    rt->cont_stmt_idx = 1;
+    rt->temp_stop_line = 0;
+    rt->breakpoint_count = 0;
 }
 
 void runtime_free(Runtime *rt) {
@@ -97,6 +105,12 @@ void runtime_reset_for_run(Runtime *rt, uint16_t start_line) {
     sysvar_set_int(&rt->sysvars, "ATTR_T_INVERSE", ATTR_INACTIVE);
     sysvar_set_int(&rt->sysvars, "S_POSN_ROW", 0);
     sysvar_set_int(&rt->sysvars, "S_POSN_COL", 0);
+
+    // Reset continuation and temporary stop line (breakpoints persist across RUNs)
+    rt->can_continue = false;
+    rt->cont_line_idx = 0;
+    rt->cont_stmt_idx = 1;
+    rt->temp_stop_line = 0;
 
     ssize_t idx = 0;
     if (start_line > 0) {
@@ -162,37 +176,161 @@ void runtime_execute_line(Runtime *rt, const char *line_text, int32_t line_no) {
     token_free(&l.current);
 }
 
-void runtime_run(Runtime *rt, uint16_t start_line) {
-    if (!rt || rt->program.count == 0) return;
-
-    runtime_reset_for_run(rt, start_line);
-
-    if (start_line > 0) {
-        ssize_t idx = program_find_index(&rt->program, start_line);
-        if (idx < 0) {
-            rt->last_error.code = ERR_INTEGER_RANGE;
-            rt->last_error.line_no = start_line;
-            rt->last_error.stmt_index = 1;
-            char err_buf[128];
-            error_format(&rt->last_error, err_buf, sizeof(err_buf));
-            fprintf(rt->out, "\n%s\n", err_buf);
-            return;
-        }
-        rt->cur_line_idx = (size_t)idx;
-    } else {
-        rt->cur_line_idx = 0;
+bool runtime_add_breakpoint(Runtime *rt, uint16_t line_no) {
+    if (!rt) return false;
+    for (size_t i = 0; i < rt->breakpoint_count; i++) {
+        if (rt->breakpoints[i] == line_no) return true;
     }
+    if (rt->breakpoint_count < MAX_BREAKPOINTS) {
+        rt->breakpoints[rt->breakpoint_count++] = line_no;
+        return true;
+    }
+    return false;
+}
+
+bool runtime_has_breakpoint(const Runtime *rt, uint16_t line_no) {
+    if (!rt) return false;
+    for (size_t i = 0; i < rt->breakpoint_count; i++) {
+        if (rt->breakpoints[i] == line_no) return true;
+    }
+    return false;
+}
+
+void runtime_clear_breakpoints(Runtime *rt) {
+    if (!rt) return;
+    rt->breakpoint_count = 0;
+    rt->temp_stop_line = 0;
+}
+
+void runtime_vars(Runtime *rt) {
+    if (!rt || !rt->out) return;
+    SymTab *st = &rt->symtab;
+    size_t total = st->num_vars_count + st->str_vars_count + st->num_arrays_count + st->str_arrays_count;
+    if (total == 0) {
+        fprintf(rt->out, "(no variables defined)\n");
+        fflush(rt->out);
+        return;
+    }
+
+    fprintf(rt->out, "%-10s %-10s %-19s %s\n", "Variable", "Type", "Dimensions / Size", "Value Preview");
+    fprintf(rt->out, "-----------------------------------------------------------------\n");
+
+    // 1. Numeric scalar variables
+    for (size_t i = 0; i < st->num_vars_count; i++) {
+        NumVar *v = &st->num_vars[i];
+        char val_buf[64];
+        if (v->val == floor(v->val) && v->val >= -2147483648.0 && v->val <= 2147483647.0) {
+            snprintf(val_buf, sizeof(val_buf), "%ld", (long)v->val);
+        } else {
+            snprintf(val_buf, sizeof(val_buf), "%.6g", v->val);
+        }
+        fprintf(rt->out, "%-10s %-10s %-19s %s\n", v->name, "NUMBER", "scalar", val_buf);
+    }
+
+    // 2. String scalar variables
+    for (size_t i = 0; i < st->str_vars_count; i++) {
+        StrVar *v = &st->str_vars[i];
+        char dim_buf[32];
+        snprintf(dim_buf, sizeof(dim_buf), "%zu byte%s", v->len, (v->len == 1) ? "" : "s");
+
+        char prev_buf[64];
+        if (v->len > 27) {
+            snprintf(prev_buf, sizeof(prev_buf), "\"%.27s...\"", v->val ? v->val : "");
+        } else {
+            snprintf(prev_buf, sizeof(prev_buf), "\"%s\"", v->val ? v->val : "");
+        }
+        fprintf(rt->out, "%-10s %-10s %-19s %s\n", v->name, "STRING", dim_buf, prev_buf);
+    }
+
+    // 3. Numeric arrays
+    for (size_t i = 0; i < st->num_arrays_count; i++) {
+        NumArray *a = &st->num_arrays[i];
+        char dim_buf[64];
+        int offset = snprintf(dim_buf, sizeof(dim_buf), "(");
+        for (size_t d = 0; d < a->ndims; d++) {
+            offset += snprintf(dim_buf + offset, sizeof(dim_buf) - offset, "%zu%s",
+                               a->dims[d], (d + 1 < a->ndims) ? ", " : ")");
+        }
+
+        char prev_buf[64];
+        if (a->total_elements == 0 || !a->data) {
+            snprintf(prev_buf, sizeof(prev_buf), "[]");
+        } else if (a->ndims == 1) {
+            if (a->total_elements <= 3) {
+                int poff = snprintf(prev_buf, sizeof(prev_buf), "[");
+                for (size_t k = 0; k < a->total_elements; k++) {
+                    poff += snprintf(prev_buf + poff, sizeof(prev_buf) - poff, "%.4g%s",
+                                     a->data[k], (k + 1 < a->total_elements) ? ", " : "]");
+                }
+            } else {
+                snprintf(prev_buf, sizeof(prev_buf), "[%.4g, %.4g...]", a->data[0], a->data[1]);
+            }
+        } else {
+            snprintf(prev_buf, sizeof(prev_buf), "[[%.4g, ...], ...]", a->data[0]);
+        }
+        fprintf(rt->out, "%-10s %-10s %-19s %s\n", a->name, "ARRAY(N)", dim_buf, prev_buf);
+    }
+
+    // 4. String arrays
+    for (size_t i = 0; i < st->str_arrays_count; i++) {
+        StrArray *a = &st->str_arrays[i];
+        char dim_buf[64];
+        int offset = snprintf(dim_buf, sizeof(dim_buf), "(");
+        for (size_t d = 0; d < a->ndims; d++) {
+            offset += snprintf(dim_buf + offset, sizeof(dim_buf) - offset, "%zu%s",
+                               a->dims[d], (d + 1 < a->ndims) ? ", " : ")");
+        }
+
+        char prev_buf[64];
+        if (a->total_elements == 0 || !a->data) {
+            snprintf(prev_buf, sizeof(prev_buf), "[]");
+        } else {
+            size_t str_len = a->dims[a->ndims - 1];
+            if (str_len > 24) str_len = 24;
+            snprintf(prev_buf, sizeof(prev_buf), "[\"%.*s%s\", ...]",
+                     (int)str_len, a->data, (a->dims[a->ndims - 1] > 24) ? "..." : "");
+        }
+        fprintf(rt->out, "%-10s %-10s %-19s %s\n", a->name, "ARRAY(S)", dim_buf, prev_buf);
+    }
+
+    fflush(rt->out);
+}
+
+static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
+    bool skip_bp_check = first_line_skip_bp;
 
     while (rt->is_running && rt->cur_line_idx < rt->program.count) {
         const ProgramLine *line = &rt->program.lines[rt->cur_line_idx];
         rt->last_error.line_no = (int32_t)line->line_no;
         rt->last_error.stmt_index = rt->cur_stmt_idx;
 
+        if (!skip_bp_check && (runtime_has_breakpoint(rt, line->line_no) ||
+            (rt->temp_stop_line != 0 && line->line_no == rt->temp_stop_line))) {
+            rt->stop_requested = true;
+            rt->last_error.code = ERR_STOP;
+            rt->last_error.custom_msg = "Breakpoint reached";
+            rt->last_error.line_no = (int32_t)line->line_no;
+            rt->last_error.stmt_index = 1;
+            rt->can_continue = true;
+            rt->cont_line_idx = rt->cur_line_idx;
+            rt->cont_stmt_idx = 1;
+            rt->temp_stop_line = 0;
+            char err_buf[128];
+            error_format(&rt->last_error, err_buf, sizeof(err_buf));
+            fprintf(rt->out, "\n%s\n", err_buf);
+            rt->is_running = false;
+            return;
+        }
+        skip_bp_check = false;
+
         if (g_interrupted) {
             g_interrupted = 0;
             rt->stop_requested = true;
             rt->last_error.code = ERR_STOP;
             rt->last_error.custom_msg = "BREAK into program";
+            rt->can_continue = true;
+            rt->cont_line_idx = rt->cur_line_idx;
+            rt->cont_stmt_idx = rt->cur_stmt_idx;
             char err_buf[128];
             error_format(&rt->last_error, err_buf, sizeof(err_buf));
             fprintf(rt->out, "\n%s\n", err_buf);
@@ -208,6 +346,20 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
         bool skip_line = false;
         bool jumped = false;
 
+        // Fast-forward to rt->cur_stmt_idx if > 1
+        if (rt->cur_stmt_idx > 1) {
+            int target_stmt = rt->cur_stmt_idx;
+            int cur_s = 1;
+            while (cur_s < target_stmt && l.current.type != TOKEN_EOF) {
+                if (l.current.type == TOKEN_COLON) {
+                    cur_s++;
+                    lexer_next(&l);
+                } else {
+                    lexer_next(&l);
+                }
+            }
+        }
+
         while (l.current.type != TOKEN_EOF && !skip_line && rt->is_running) {
             rt->last_error.line_no = (int32_t)line->line_no;
             rt->last_error.stmt_index = rt->cur_stmt_idx;
@@ -218,6 +370,9 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
                 rt->stop_requested = true;
                 rt->last_error.code = ERR_STOP;
                 rt->last_error.custom_msg = "BREAK into program";
+                rt->can_continue = true;
+                rt->cont_line_idx = rt->cur_line_idx;
+                rt->cont_stmt_idx = rt->cur_stmt_idx;
                 char err_buf[128];
                 error_format(&rt->last_error, err_buf, sizeof(err_buf));
                 fprintf(rt->out, "\n%s\n", err_buf);
@@ -228,7 +383,8 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
 
             size_t next_offset = l.cursor;
             if (!parser_execute_statement(&l, rt, next_offset, &skip_line)) {
-                if (rt->last_error.code != ERR_OK) {
+                if (rt->last_error.code != ERR_OK && !rt->stop_requested) {
+                    rt->can_continue = false;
                     char err_buf[128];
                     error_format(&rt->last_error, err_buf, sizeof(err_buf));
                     fprintf(rt->out, "\n%s\n", err_buf);
@@ -237,6 +393,19 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
                     return;
                 }
                 if (rt->stop_requested) {
+                    if (l.current.type == TOKEN_COLON) {
+                        rt->can_continue = true;
+                        rt->cont_line_idx = rt->cur_line_idx;
+                        rt->cont_stmt_idx = rt->cur_stmt_idx + 1;
+                    } else {
+                        if (rt->cur_line_idx + 1 < rt->program.count) {
+                            rt->can_continue = true;
+                            rt->cont_line_idx = rt->cur_line_idx + 1;
+                            rt->cont_stmt_idx = 1;
+                        } else {
+                            rt->can_continue = false;
+                        }
+                    }
                     char err_buf[128];
                     error_format(&rt->last_error, err_buf, sizeof(err_buf));
                     fprintf(rt->out, "\n%s\n", err_buf);
@@ -290,6 +459,78 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
         fprintf(rt->out, "\n%s\n", err_buf);
     }
     rt->is_running = false;
+    rt->can_continue = false;
+}
+
+void runtime_run(Runtime *rt, uint16_t start_line) {
+    if (!rt || rt->program.count == 0) return;
+
+    runtime_reset_for_run(rt, start_line);
+
+    if (start_line > 0) {
+        ssize_t idx = program_find_index(&rt->program, start_line);
+        if (idx < 0) {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+            rt->last_error.line_no = start_line;
+            rt->last_error.stmt_index = 1;
+            char err_buf[128];
+            error_format(&rt->last_error, err_buf, sizeof(err_buf));
+            fprintf(rt->out, "\n%s\n", err_buf);
+            return;
+        }
+        rt->cur_line_idx = (size_t)idx;
+    } else {
+        rt->cur_line_idx = 0;
+    }
+
+    runtime_run_loop(rt, false);
+}
+
+bool runtime_continue(Runtime *rt, uint16_t temp_stop_line) {
+    if (!rt) return false;
+
+    if (rt->is_running) {
+        if (temp_stop_line > 0) {
+            if (program_find_index(&rt->program, temp_stop_line) < 0) {
+                rt->last_error.code = ERR_INTEGER_RANGE;
+                return false;
+            }
+            rt->temp_stop_line = temp_stop_line;
+        }
+        return true;
+    }
+
+    if (!rt->can_continue) {
+        rt->last_error.code = ERR_NONSENSE;
+        rt->last_error.custom_msg = NULL;
+        return false;
+    }
+
+    if (temp_stop_line > 0) {
+        if (program_find_index(&rt->program, temp_stop_line) < 0) {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+            return false;
+        }
+        rt->temp_stop_line = temp_stop_line;
+    }
+
+    if (rt->cont_line_idx >= rt->program.count) {
+        rt->can_continue = false;
+        return true;
+    }
+
+    rt->cur_line_idx = rt->cont_line_idx;
+    rt->cur_stmt_idx = rt->cont_stmt_idx;
+    rt->cur_offset = 0;
+    rt->is_running = true;
+    rt->stop_requested = false;
+    rt->jump_requested = false;
+    rt->last_error.code = ERR_OK;
+    rt->last_error.custom_msg = NULL;
+    rt->can_continue = false;
+
+    runtime_run_loop(rt, (rt->cur_stmt_idx == 1));
+    return (rt->last_error.code == ERR_OK || rt->last_error.code == ERR_STOP);
 }
 
 bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) {
