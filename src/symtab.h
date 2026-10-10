@@ -52,6 +52,8 @@ typedef struct {
     StrArray *str_arrays;
     size_t str_arrays_count;
     size_t str_arrays_cap;
+
+    struct SysVarTable *sysvars;
 } SymTab;
 
 void symtab_init(SymTab *st);

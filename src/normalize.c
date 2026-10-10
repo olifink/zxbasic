@@ -13,6 +13,7 @@ static bool is_zx_keyword(const char *upper) {
         "FOR", "TO", "STEP", "NEXT", "DATA", "READ", "RESTORE", "DIM",
         "STOP", "REM", "RUN", "LIST", "NEW", "CLEAR", "CLS", "SAVE",
         "LOAD", "EDIT", "AUTO", "EXIT", "RENUM",
+        "INK", "PAPER", "BRIGHT", "INVERSE", "AT",
         "AND", "OR", "NOT",
         "ABS", "ACS", "ASN", "ATN", "COS", "EXP", "INT", "LN", "RND",
         "SGN", "SIN", "SQR", "TAN",
@@ -63,7 +64,7 @@ char *normalize_keywords(const char *source) {
         // Word (keyword or identifier)
         if (isalpha((unsigned char)c)) {
             size_t start = i;
-            while (isalnum((unsigned char)source[i])) {
+            while (isalnum((unsigned char)source[i]) || source[i] == '_') {
                 i++;
             }
             if (source[i] == '$') {
@@ -341,6 +342,23 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
                     lexer_next(l);
                     continue;
                 }
+                if (l->current.type == TOKEN_AT) {
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    if (l->current.type != TOKEN_COMMA) {
+                        *err_col = l->current.col;
+                        return false;
+                    }
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    continue;
+                }
+                if (l->current.type == TOKEN_INK || l->current.type == TOKEN_PAPER ||
+                    l->current.type == TOKEN_BRIGHT || l->current.type == TOKEN_INVERSE) {
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    continue;
+                }
                 if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
                 if (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA || l->current.type == TOKEN_APOSTROPHE) {
                     lexer_next(l);
@@ -351,10 +369,34 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
 
         case TOKEN_INPUT: {
             lexer_next(l);
-            if (l->current.type == TOKEN_STRING) {
-                lexer_next(l);
-                if (l->current.type == TOKEN_SEMICOLON) {
+            while (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA ||
+                   l->current.type == TOKEN_AT || l->current.type == TOKEN_INK ||
+                   l->current.type == TOKEN_PAPER || l->current.type == TOKEN_BRIGHT ||
+                   l->current.type == TOKEN_INVERSE || l->current.type == TOKEN_STRING) {
+                if (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA) {
                     lexer_next(l);
+                    continue;
+                }
+                if (l->current.type == TOKEN_STRING) {
+                    lexer_next(l);
+                    continue;
+                }
+                if (l->current.type == TOKEN_AT) {
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    if (l->current.type != TOKEN_COMMA) {
+                        *err_col = l->current.col;
+                        return false;
+                    }
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    continue;
+                }
+                if (l->current.type == TOKEN_INK || l->current.type == TOKEN_PAPER ||
+                    l->current.type == TOKEN_BRIGHT || l->current.type == TOKEN_INVERSE) {
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    continue;
                 }
             }
             if (l->current.type != TOKEN_IDENT) {
@@ -496,6 +538,18 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
         case TOKEN_EDIT:
         case TOKEN_AUTO:
         case TOKEN_RENUM:
+            *err_col = l->current.col;
+            return false;
+
+        case TOKEN_INK:
+        case TOKEN_PAPER:
+        case TOKEN_BRIGHT:
+        case TOKEN_INVERSE:
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
+
+        case TOKEN_AT:
+            // Standalone AT is illegal (allowed only within PRINT and INPUT)
             *err_col = l->current.col;
             return false;
 

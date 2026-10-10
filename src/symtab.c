@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "symtab.h"
+#include "sysvars.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,7 +39,6 @@ void symtab_clear(SymTab *st) {
 void symtab_free(SymTab *st) {
     if (!st) return;
     symtab_clear(st);
-
     free(st->num_vars);
     free(st->str_vars);
     free(st->num_arrays);
@@ -51,6 +51,18 @@ bool symtab_get_num(const SymTab *st, const char *name, double *out) {
     for (size_t i = 0; i < st->num_vars_count; i++) {
         if (strcmp(st->num_vars[i].name, name) == 0) {
             if (out) *out = st->num_vars[i].val;
+            return true;
+        }
+    }
+    if (st->sysvars) {
+        int64_t ival = 0;
+        if (sysvar_get_int(st->sysvars, name, &ival)) {
+            if (out) *out = (double)ival;
+            return true;
+        }
+        double dval = 0;
+        if (sysvar_get_double(st->sysvars, name, &dval)) {
+            if (out) *out = dval;
             return true;
         }
     }
@@ -89,6 +101,14 @@ bool symtab_get_str(const SymTab *st, const char *name, const char **out_str, si
         if (strcmp(st->str_vars[i].name, name) == 0) {
             if (out_str) *out_str = st->str_vars[i].val;
             if (out_len) *out_len = st->str_vars[i].len;
+            return true;
+        }
+    }
+    if (st->sysvars) {
+        const char *s = NULL;
+        if (sysvar_get_str(st->sysvars, name, &s)) {
+            if (out_str) *out_str = s;
+            if (out_len) *out_len = strlen(s);
             return true;
         }
     }

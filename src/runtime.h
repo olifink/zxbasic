@@ -9,6 +9,8 @@
 #include "program.h"
 #include "symtab.h"
 #include "error.h"
+#include "sysvars.h"
+#include "console.h"
 
 extern volatile sig_atomic_t g_interrupted;
 void setup_signal_handlers(void);
@@ -31,7 +33,7 @@ typedef struct {
     size_t char_offset;
 } ForFrame;
 
-typedef struct {
+typedef struct Runtime {
     Program program;
     SymTab symtab;
 
@@ -70,8 +72,14 @@ typedef struct {
     uint16_t auto_step;
     char *edit_prefill_buffer;
 
-    // Console output tracking
+    // System variables
+    SysVarTable sysvars;
+
+    // Console output tracking & terminal attributes
     int print_col;
+    ConsoleTermAttrs term_attrs;
+    bool ink_explicitly_set;
+    bool paper_explicitly_set;
     FILE *out;
     FILE *in;
 } Runtime;

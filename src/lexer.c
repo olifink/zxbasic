@@ -70,6 +70,11 @@ const char *token_type_name(TokenType t) {
         case TOKEN_AUTO: return "AUTO";
         case TOKEN_EXIT: return "EXIT";
         case TOKEN_RENUM: return "RENUM";
+        case TOKEN_INK: return "INK";
+        case TOKEN_PAPER: return "PAPER";
+        case TOKEN_BRIGHT: return "BRIGHT";
+        case TOKEN_INVERSE: return "INVERSE";
+        case TOKEN_AT: return "AT";
         case TOKEN_ABS: return "ABS";
         case TOKEN_ACS: return "ACS";
         case TOKEN_ASN: return "ASN";
@@ -158,6 +163,11 @@ static TokenType match_keyword(const char *upper) {
     if (strcmp(upper, "AUTO") == 0) return TOKEN_AUTO;
     if (strcmp(upper, "EXIT") == 0) return TOKEN_EXIT;
     if (strcmp(upper, "RENUM") == 0) return TOKEN_RENUM;
+    if (strcmp(upper, "INK") == 0) return TOKEN_INK;
+    if (strcmp(upper, "PAPER") == 0) return TOKEN_PAPER;
+    if (strcmp(upper, "BRIGHT") == 0) return TOKEN_BRIGHT;
+    if (strcmp(upper, "INVERSE") == 0) return TOKEN_INVERSE;
+    if (strcmp(upper, "AT") == 0) return TOKEN_AT;
 
     if (strcmp(upper, "AND") == 0) return TOKEN_AND;
     if (strcmp(upper, "OR") == 0) return TOKEN_OR;
@@ -259,7 +269,7 @@ void lexer_next(Lexer *l) {
     // Identifiers and Keywords
     if (isalpha((unsigned char)c)) {
         size_t start = l->cursor;
-        while (isalnum((unsigned char)peek(l))) {
+        while (isalnum((unsigned char)peek(l)) || peek(l) == '_') {
             advance(l);
         }
         if (peek(l) == '$') {

@@ -29,6 +29,9 @@ void runtime_init(Runtime *rt) {
     memset(rt, 0, sizeof(*rt));
     program_init(&rt->program);
     symtab_init(&rt->symtab);
+    sysvar_table_init(&rt->sysvars);
+    rt->symtab.sysvars = &rt->sysvars;
+    console_init(rt);
     rt->out = stdout;
     rt->in = stdin;
     rt->print_col = 0;
@@ -45,6 +48,7 @@ void runtime_init(Runtime *rt) {
 void runtime_clear(Runtime *rt) {
     if (!rt) return;
     symtab_clear(&rt->symtab);
+    rt->symtab.sysvars = &rt->sysvars;
     rt->is_running = false;
     rt->stop_requested = false;
     rt->jump_requested = false;
@@ -54,6 +58,13 @@ void runtime_clear(Runtime *rt) {
     rt->data_offset = 0;
     rt->data_initialized = false;
     rt->print_col = 0;
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INK", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_PAPER", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_BRIGHT", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INVERSE", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "S_POSN_ROW", 0);
+    sysvar_set_int(&rt->sysvars, "S_POSN_COL", 0);
+    console_reset_term_attrs(rt);
     rt->last_error.code = ERR_OK;
     rt->last_error.custom_msg = NULL;
     rt->last_error.line_no = -1;
@@ -67,17 +78,25 @@ void runtime_free(Runtime *rt) {
     if (!rt) return;
     program_free(&rt->program);
     symtab_free(&rt->symtab);
+    sysvar_table_free(&rt->sysvars);
     free(rt->edit_prefill_buffer);
     memset(rt, 0, sizeof(*rt));
 }
 
 void runtime_reset_for_run(Runtime *rt, uint16_t start_line) {
     symtab_clear(&rt->symtab);
+    rt->symtab.sysvars = &rt->sysvars;
     rt->is_running = true;
     rt->stop_requested = false;
     rt->jump_requested = false;
     rt->call_sp = 0;
     rt->for_sp = 0;
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INK", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_PAPER", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_BRIGHT", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INVERSE", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "S_POSN_ROW", 0);
+    sysvar_set_int(&rt->sysvars, "S_POSN_COL", 0);
 
     ssize_t idx = 0;
     if (start_line > 0) {

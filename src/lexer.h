@@ -67,6 +67,11 @@ typedef enum {
     TOKEN_AUTO,
     TOKEN_EXIT,
     TOKEN_RENUM,
+    TOKEN_INK,
+    TOKEN_PAPER,
+    TOKEN_BRIGHT,
+    TOKEN_INVERSE,
+    TOKEN_AT,
 
     // Built-in functions
     TOKEN_ABS,

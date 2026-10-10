@@ -2,6 +2,8 @@
 
 #include "parser.h"
 #include "expr.h"
+#include "console.h"
+#include "sysvars.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,23 +13,53 @@
 
 static void print_chars(Runtime *rt, const char *s, size_t len) {
     if (!rt || !rt->out || !s || len == 0) return;
+    int64_t row = 0, col = 0, scr_rows = 24, scr_cols = 32;
+    sysvar_get_int(&rt->sysvars, "S_POSN_ROW", &row);
+    sysvar_get_int(&rt->sysvars, "S_POSN_COL", &col);
+    sysvar_get_int(&rt->sysvars, "SCR_ROWS", &scr_rows);
+    sysvar_get_int(&rt->sysvars, "SCR_COLS", &scr_cols);
+
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         fputc(c, rt->out);
         if (c == '\n') {
             rt->print_col = 0;
+            col = 0;
+            row++;
+            if (row >= scr_rows) row = scr_rows - 1;
         } else {
             rt->print_col++;
+            col++;
+            if (col >= scr_cols) {
+                col = 0;
+                rt->print_col = 0;
+                row++;
+                if (row >= scr_rows) row = scr_rows - 1;
+            }
         }
     }
+    sysvar_set_int(&rt->sysvars, "S_POSN_ROW", row);
+    sysvar_set_int(&rt->sysvars, "S_POSN_COL", col);
+}
+
+static void print_newline(Runtime *rt) {
+    if (!rt || !rt->out) return;
+    fputc('\n', rt->out);
+    rt->print_col = 0;
+    int64_t row = 0, scr_rows = 24;
+    sysvar_get_int(&rt->sysvars, "S_POSN_ROW", &row);
+    sysvar_get_int(&rt->sysvars, "SCR_ROWS", &scr_rows);
+    row++;
+    if (row >= scr_rows) row = scr_rows - 1;
+    sysvar_set_int(&rt->sysvars, "S_POSN_ROW", row);
+    sysvar_set_int(&rt->sysvars, "S_POSN_COL", 0);
 }
 
 static void print_tab(Runtime *rt) {
     if (!rt || !rt->out) return;
     int next_tab = ((rt->print_col / 16) + 1) * 16;
     while (rt->print_col < next_tab) {
-        fputc(' ', rt->out);
-        rt->print_col++;
+        print_chars(rt, " ", 1);
     }
 }
 
@@ -253,6 +285,14 @@ static bool parse_let(Lexer *l, Runtime *rt) {
         return false;
     }
 
+    const SysVar *sv = sysvar_lookup_const(&rt->sysvars, var_name);
+    if (sv && (sv->flags & SVAR_FLAG_READ_ONLY)) {
+        rt->last_error.code = ERR_NONSENSE;
+        value_free(&val);
+        free(var_name);
+        return false;
+    }
+
     size_t nlen = strlen(var_name);
     if (nlen > 0 && var_name[nlen - 1] == '$') {
         if (!value_is_str(&val)) {
@@ -262,6 +302,9 @@ static bool parse_let(Lexer *l, Runtime *rt) {
             return false;
         }
         symtab_set_str(&rt->symtab, var_name, val.as.str.chars, val.as.str.len);
+        if (sv) {
+            sysvar_set_str(&rt->sysvars, var_name, val.as.str.chars);
+        }
     } else {
         if (!value_is_num(&val)) {
             rt->last_error.code = ERR_NONSENSE;
@@ -270,6 +313,10 @@ static bool parse_let(Lexer *l, Runtime *rt) {
             return false;
         }
         symtab_set_num(&rt->symtab, var_name, val.as.num);
+        if (sv) {
+            sysvar_set_int(&rt->sysvars, var_name, (int64_t)floor(val.as.num));
+            console_apply_delta(rt);
+        }
     }
 
     value_free(&val);
@@ -281,6 +328,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
     lexer_next(l); // consume PRINT
 
     bool ended_with_separator = false;
+    bool modified_temp_attrs = false;
 
     while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
         if (l->current.type == TOKEN_SEMICOLON) {
@@ -296,15 +344,79 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
         if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            fputc('\n', rt->out);
-            rt->print_col = 0;
+            print_newline(rt);
             lexer_next(l);
+            continue;
+        }
+        if (l->current.type == TOKEN_AT) {
+            ended_with_separator = false;
+            lexer_next(l); // consume AT
+            Value row_v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&row_v)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (l->current.type != TOKEN_COMMA) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            lexer_next(l); // consume COMMA
+            Value col_v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&col_v)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+
+            if (!console_cursor_at(rt, (int64_t)floor(row_v.as.num), (int64_t)floor(col_v.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            continue;
+        }
+        if (l->current.type == TOKEN_INK) {
+            ended_with_separator = false;
+            lexer_next(l); // consume INK
+            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_ink(rt, (int64_t)floor(cv.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_PAPER) {
+            ended_with_separator = false;
+            lexer_next(l); // consume PAPER
+            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_paper(rt, (int64_t)floor(cv.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_BRIGHT) {
+            ended_with_separator = false;
+            lexer_next(l); // consume BRIGHT
+            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_bright(rt, (int64_t)floor(fv.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_INVERSE) {
+            ended_with_separator = false;
+            lexer_next(l); // consume INVERSE
+            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_inverse(rt, (int64_t)floor(fv.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            modified_temp_attrs = true;
             continue;
         }
 
         Value v = expr_eval(l, &rt->symtab, &rt->last_error);
         if (rt->last_error.code != ERR_OK) {
-            return false;
+            goto cleanup;
         }
 
         char *s = value_to_str(&v);
@@ -324,38 +436,108 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             lexer_next(l);
         } else if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            fputc('\n', rt->out);
-            rt->print_col = 0;
+            print_newline(rt);
             lexer_next(l);
         }
     }
 
     if (!ended_with_separator) {
-        fputc('\n', rt->out);
-        rt->print_col = 0;
+        print_newline(rt);
     }
     fflush(rt->out);
+
+    if (modified_temp_attrs) {
+        console_reset_temporary_attrs(rt);
+    }
     return true;
+
+cleanup:
+    if (modified_temp_attrs) {
+        console_reset_temporary_attrs(rt);
+    }
+    return false;
 }
 
 static bool parse_input(Lexer *l, Runtime *rt) {
     lexer_next(l); // consume INPUT
 
-    if (l->current.type == TOKEN_STRING) {
-        // Prompt string
-        print_chars(rt, l->current.str_val, l->current.str_len);
-        lexer_next(l);
-        if (l->current.type == TOKEN_SEMICOLON) {
+    bool had_prompt = false;
+    bool modified_temp_attrs = false;
+
+    while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+        if (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA) {
             lexer_next(l);
+            continue;
         }
-    } else {
+        if (l->current.type == TOKEN_AT) {
+            lexer_next(l); // consume AT
+            Value row_v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&row_v)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (l->current.type != TOKEN_COMMA) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            lexer_next(l); // consume COMMA
+            Value col_v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&col_v)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+
+            if (!console_cursor_at(rt, (int64_t)floor(row_v.as.num), (int64_t)floor(col_v.as.num), &rt->last_error)) {
+                goto cleanup;
+            }
+            continue;
+        }
+        if (l->current.type == TOKEN_INK) {
+            lexer_next(l); // consume INK
+            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_ink(rt, (int64_t)floor(cv.as.num), &rt->last_error)) goto cleanup;
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_PAPER) {
+            lexer_next(l); // consume PAPER
+            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_paper(rt, (int64_t)floor(cv.as.num), &rt->last_error)) goto cleanup;
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_BRIGHT) {
+            lexer_next(l); // consume BRIGHT
+            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_bright(rt, (int64_t)floor(fv.as.num), &rt->last_error)) goto cleanup;
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_INVERSE) {
+            lexer_next(l); // consume INVERSE
+            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) goto cleanup;
+            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!console_set_temporary_inverse(rt, (int64_t)floor(fv.as.num), &rt->last_error)) goto cleanup;
+            modified_temp_attrs = true;
+            continue;
+        }
+        if (l->current.type == TOKEN_STRING) {
+            had_prompt = true;
+            print_chars(rt, l->current.str_val, l->current.str_len);
+            lexer_next(l);
+            continue;
+        }
+        break; // Identifier
+    }
+
+    if (!had_prompt) {
         print_chars(rt, "? ", 2);
     }
     fflush(rt->out);
 
     if (l->current.type != TOKEN_IDENT) {
         rt->last_error.code = ERR_NONSENSE;
-        return false;
+        goto cleanup;
     }
 
     char *var_name = strdup(l->current.str_val);
@@ -369,7 +551,7 @@ static bool parse_input(Lexer *l, Runtime *rt) {
             rt->last_error.code = ERR_STOP;
             rt->last_error.custom_msg = "BREAK into program";
             free(var_name);
-            return false;
+            goto cleanup;
         }
         line_buf[0] = '\0';
     }
@@ -389,7 +571,16 @@ static bool parse_input(Lexer *l, Runtime *rt) {
     }
 
     free(var_name);
+    if (modified_temp_attrs) {
+        console_reset_temporary_attrs(rt);
+    }
     return true;
+
+cleanup:
+    if (modified_temp_attrs) {
+        console_reset_temporary_attrs(rt);
+    }
+    return false;
 }
 
 static bool parse_dim(Lexer *l, Runtime *rt) {
@@ -947,12 +1138,44 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
 
         case TOKEN_CLS:
             lexer_next(l);
-            if (rt->out) {
-                fprintf(rt->out, "\033[2J\033[H");
-                fflush(rt->out);
-            }
-            rt->print_col = 0;
+            console_cls(rt);
             return true;
+
+        case TOKEN_INK: {
+            lexer_next(l);
+            Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+            return console_set_permanent_ink(rt, (int64_t)floor(v.as.num), &rt->last_error);
+        }
+
+        case TOKEN_PAPER: {
+            lexer_next(l);
+            Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+            return console_set_permanent_paper(rt, (int64_t)floor(v.as.num), &rt->last_error);
+        }
+
+        case TOKEN_BRIGHT: {
+            lexer_next(l);
+            Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+            return console_set_permanent_bright(rt, (int64_t)floor(v.as.num), &rt->last_error);
+        }
+
+        case TOKEN_INVERSE: {
+            lexer_next(l);
+            Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
+            return console_set_permanent_inverse(rt, (int64_t)floor(v.as.num), &rt->last_error);
+        }
+
+        case TOKEN_AT:
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
 
         case TOKEN_SAVE: {
             lexer_next(l);
