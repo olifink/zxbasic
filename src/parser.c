@@ -1184,14 +1184,71 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
 
         case TOKEN_LIST: {
             lexer_next(l);
-            uint16_t start_line = 0;
-            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
-                Value v = expr_eval(l, &rt->symtab, &rt->last_error);
+            uint16_t from = MIN_LINE_NO;
+            uint16_t to = MAX_LINE_NO;
+
+            if (l->current.type == TOKEN_TO) {
+                // LIST TO [to]
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    Value to_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                    if (rt->last_error.code != ERR_OK) return false;
+                    if (!value_is_num(&to_val)) {
+                        value_free(&to_val);
+                        rt->last_error.code = ERR_NONSENSE;
+                        return false;
+                    }
+                    double d_to = to_val.as.num;
+                    value_free(&to_val);
+                    if (d_to < MIN_LINE_NO || d_to > MAX_LINE_NO || floor(d_to) != d_to) {
+                        rt->last_error.code = ERR_INTEGER_RANGE;
+                        return false;
+                    }
+                    to = (uint16_t)d_to;
+                }
+            } else if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                Value first_val = expr_eval(l, &rt->symtab, &rt->last_error);
                 if (rt->last_error.code != ERR_OK) return false;
-                if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
-                start_line = (uint16_t)floor(v.as.num);
+                if (!value_is_num(&first_val)) {
+                    value_free(&first_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_from = first_val.as.num;
+                value_free(&first_val);
+                if (d_from < MIN_LINE_NO || d_from > MAX_LINE_NO || floor(d_from) != d_from) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                from = (uint16_t)d_from;
+
+                if (l->current.type == TOKEN_TO) {
+                    lexer_next(l);
+                    if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                        Value to_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                        if (rt->last_error.code != ERR_OK) return false;
+                        if (!value_is_num(&to_val)) {
+                            value_free(&to_val);
+                            rt->last_error.code = ERR_NONSENSE;
+                            return false;
+                        }
+                        double d_to = to_val.as.num;
+                        value_free(&to_val);
+                        if (d_to < MIN_LINE_NO || d_to > MAX_LINE_NO || floor(d_to) != d_to) {
+                            rt->last_error.code = ERR_INTEGER_RANGE;
+                            return false;
+                        }
+                        to = (uint16_t)d_to;
+                    } else {
+                        to = MAX_LINE_NO;
+                    }
+                } else {
+                    // LIST <line> without TO lists from that line to end
+                    to = MAX_LINE_NO;
+                }
             }
-            program_list(&rt->program, start_line, rt->out);
+
+            program_list_range(&rt->program, from, to, rt->out);
             return true;
         }
 

@@ -28,6 +28,7 @@ In ZXBasic, program storage and persistence are managed across the `Program` and
 | `CAT [<path_expr>]` | Filesystem | Catalogs and displays directory entries line-by-line relative to the working/program directory. |
 | `DELETE <file_expr>` | Filesystem | Removes the specified file from the host filesystem. |
 | `DELETE [<from>] TO [<to>]` | Program Store | Deletes a range of stored program lines between `<from>` and `<to>` in memory. |
+| `LIST [[<from>] TO [<to>] \| <start>]` | Program Store | Lists stored program lines across the specified range (or whole program). |
 
 ---
 
@@ -201,26 +202,51 @@ The parser and syntax normalizer inspect the token immediately following `DELETE
 
 ---
 
-## 7. Grammar, Lexer & Normalizer Specifications
+## 7. Program Listing: `LIST [<from>] [TO [<to>]]`
 
-### 7.1 New Keywords & Tokens
+Like `DELETE`, the `LIST` statement supports program line ranges using `TO`, matching Sinclair BASIC conventions.
+
+### 7.1 Syntax Variations
+* `LIST` — Lists all program lines in memory (lines `1 .. 9999`).
+* `LIST <start_expr>` — Lists from line `<start_expr>` to the end of the program (Sinclair standard single-parameter form).
+* `LIST <from> TO <to>` — Lists all lines whose line numbers satisfy $from \le \text{line\_no} \le to$.
+* `LIST TO <to>` — Omitted `from`: lists lines from the first stored line up to $to$ ($\text{line\_no} \le to$).
+* `LIST <from> TO` — Omitted `to`: lists lines from $from$ up to the end of the program ($\text{line\_no} \ge from$).
+* `LIST TO` — Both omitted: lists all stored program lines in memory (equivalent to `LIST`).
+
+### 7.2 Semantics & Display
+* Formats lines as `<line_no> <source_text>\n` emitted to `rt->out`.
+* Lines are retrieved in ascending line number order.
+* If $from > to$, no lines match the specified range and no output is produced.
+* Valid both in Immediate Mode and inside stored program lines.
+
+### 7.3 Error Conditions
+* Line numbers must evaluate to integers in range `1 .. 9999`. Non-integers or values outside range raise `B Integer out of range`.
+* Non-numeric expressions raise `C Nonsense in BASIC`.
+
+---
+
+## 8. Grammar, Lexer & Normalizer Specifications
+
+### 8.1 New Keywords & Tokens
 * `TOKEN_MERGE` — Keyword `"MERGE"`
 * `TOKEN_CAT` — Keyword `"CAT"`
 * `TOKEN_DELETE` — Keyword `"DELETE"`
 * `TOKEN_LINE` — Keyword `"LINE"`
 
-*(Existing tokens `TOKEN_RUN`, `TOKEN_SAVE`, `TOKEN_LOAD`, and `TOKEN_TO` are reused.)*
+*(Existing tokens `TOKEN_LIST`, `TOKEN_RUN`, `TOKEN_SAVE`, `TOKEN_LOAD`, and `TOKEN_TO` are reused.)*
 
-### 7.2 Keyword Auto-Capitalization (`src/normalize.c`)
+### 8.2 Keyword Auto-Capitalization (`src/normalize.c`)
 Add `"MERGE"`, `"CAT"`, `"DELETE"`, `"LINE"` to `is_zx_keyword()`.
-* Input: `10 merge "lib.bas": cat "data": delete "old.tmp"`
-* Stored: `10 MERGE "lib.bas": CAT "data": DELETE "old.tmp"`
-* Input: `delete 10 to 50`
-* Normalized: `DELETE 10 TO 50`
+* Input: `10 merge "lib.bas": cat "data": delete 10 to 50`
+* Stored: `10 MERGE "lib.bas": CAT "data": DELETE 10 TO 50`
+* Input: `list 20 to 100`
+* Normalized: `LIST 20 TO 100`
 * Input: `save "backup.bas" line 20`
 * Normalized: `SAVE "backup.bas" LINE 20`
 
-### 7.3 Ingestion Syntax Gating
+### 8.3 Ingestion Syntax Gating
+* `LIST [[<expr>] TO [<expr>] | <expr>]`: valid line numbers with optional `TO`.
 * `MERGE <expr>`: `<expr>` must be valid syntax.
 * `CAT [<expr>]`: optional `<expr>` must be valid syntax.
 * `DELETE <expr>`: valid file string expression.
@@ -230,14 +256,17 @@ Add `"MERGE"`, `"CAT"`, `"DELETE"`, `"LINE"` to `is_zx_keyword()`.
 
 ---
 
-## 8. Architectural Runtime Changes
+## 9. Architectural Runtime Changes
 
-### 8.1 Module Interfaces
+### 9.1 Module Interfaces
 
 #### `src/program.h` & `src/program.c`
 ```c
 // Deletes all lines with line_no between from and to (inclusive)
 void program_delete_range(Program *p, uint16_t from, uint16_t to);
+
+// Lists program lines between from and to (inclusive) to out stream
+void program_list_range(const Program *p, uint16_t from, uint16_t to, FILE *out);
 ```
 
 #### `src/runtime.h` & `src/runtime.c`
@@ -257,6 +286,7 @@ bool runtime_delete_file(Runtime *rt, const char *path);
 ```
 
 #### `src/parser.c`
+* Dispatch `TOKEN_LIST`: parse optional range `[from] [TO [to]]` and call `program_list_range`.
 * Dispatch `TOKEN_MERGE`: parse string expression $\rightarrow$ `runtime_merge`.
 * Dispatch `TOKEN_CAT`: parse optional string expression $\rightarrow$ `runtime_cat`.
 * Dispatch `TOKEN_DELETE`:
@@ -270,9 +300,9 @@ bool runtime_delete_file(Runtime *rt, const char *path);
 
 ---
 
-## 9. Verification & Test Scenarios
+## 10. Verification & Test Scenarios
 
-### 9.1 Test Cases for Test Suite (`tests/test_files.c`)
+### 10.1 Test Cases for Test Suite (`tests/test_files.c`)
 1. **`MERGE` Integrity:**
    * Create Program A: `10 PRINT "A"`, `20 PRINT "A2"`, `30 PRINT "A3"`.
    * Create Program B on disk: `20 PRINT "B2_OVERWRITE"`, `40 PRINT "B4_NEW"`.
@@ -301,3 +331,11 @@ bool runtime_delete_file(Runtime *rt, const char *path);
    * Test `DELETE TO 20` $\rightarrow$ line `50` remains.
    * Test `DELETE 50 TO` $\rightarrow$ no lines remain.
    * Verify attempting inside a running program raises `C Nonsense in BASIC`.
+7. **`LIST [<from>] [TO [<to>]]` Program Ranges:**
+   * Populate program with lines `10, 20, 30, 40, 50`.
+   * Test `LIST 20 TO 40` $\rightarrow$ outputs lines `20, 30, 40`.
+   * Test `LIST TO 30` $\rightarrow$ outputs lines `10, 20, 30`.
+   * Test `LIST 30 TO` $\rightarrow$ outputs lines `30, 40, 50`.
+   * Test `LIST TO` $\rightarrow$ outputs all lines `10 .. 50`.
+   * Test `LIST 20` $\rightarrow$ outputs lines `20 .. 50`.
+   * Test `LIST 50 TO 20` $\rightarrow$ outputs nothing.

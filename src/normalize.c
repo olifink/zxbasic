@@ -556,6 +556,26 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
             }
             return true;
 
+        case TOKEN_LIST:
+            lexer_next(l);
+            if (l->current.type == TOKEN_TO) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    return validate_precedence(l, VPREC_NONE, err_col);
+                }
+                return true;
+            }
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type == TOKEN_TO) {
+                    lexer_next(l);
+                    if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                        return validate_precedence(l, VPREC_NONE, err_col);
+                    }
+                }
+            }
+            return true;
+
         case TOKEN_LOAD:
             lexer_next(l);
             return validate_precedence(l, VPREC_NONE, err_col);

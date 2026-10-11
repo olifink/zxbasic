@@ -48,6 +48,9 @@ const ProgramLine *program_get_line(const Program *p, size_t index);
 // Lists program lines to stream, starting from start_line (or 1 if 0).
 void program_list(const Program *p, uint16_t start_line, FILE *out);
 
+// Lists program lines to stream where line_no is between from and to (inclusive).
+void program_list_range(const Program *p, uint16_t from, uint16_t to, FILE *out);
+
 // Renumbers stored lines starting at start_line with step increment, patching branch targets.
 // If any line would exceed 9999, aborts without modifying store and sets err->code = ERR_INTEGER_RANGE.
 bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError *err, FILE *warn_out);

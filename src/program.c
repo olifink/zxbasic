@@ -150,20 +150,23 @@ const ProgramLine *program_get_line(const Program *p, size_t index) {
     return &p->lines[index];
 }
 
-void program_list(const Program *p, uint16_t start_line, FILE *out) {
-    if (!p || !out || p->count == 0) return;
+void program_list_range(const Program *p, uint16_t from, uint16_t to, FILE *out) {
+    if (!p || !out || p->count == 0 || from > to) return;
 
-    ssize_t start_idx = 0;
-    if (start_line > 0) {
-        start_idx = program_find_ge_index(p, start_line);
-        if (start_idx < 0) {
-            return;
-        }
+    ssize_t start_idx = program_find_ge_index(p, from);
+    if (start_idx < 0) {
+        return;
     }
 
     for (size_t i = (size_t)start_idx; i < p->count; i++) {
+        if (p->lines[i].line_no > to) break;
         fprintf(out, "%u %s\n", (unsigned int)p->lines[i].line_no, p->lines[i].source);
     }
+}
+
+void program_list(const Program *p, uint16_t start_line, FILE *out) {
+    uint16_t from = (start_line == 0) ? MIN_LINE_NO : start_line;
+    program_list_range(p, from, MAX_LINE_NO, out);
 }
 
 #include "lexer.h"

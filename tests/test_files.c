@@ -418,9 +418,109 @@ static void test_normalization_and_syntax(void) {
     assert(syntax_validate_line("DELETE \"file.bas\"", &err_col));
     assert(syntax_validate_line("DELETE 10 TO 50", &err_col));
     assert(syntax_validate_line("DELETE TO 50", &err_col));
-    assert(syntax_validate_line("DELETE 10 TO", &err_col));
+    assert(syntax_validate_line("LIST", &err_col));
+    assert(syntax_validate_line("LIST 10", &err_col));
+    assert(syntax_validate_line("LIST 10 TO 50", &err_col));
+    assert(syntax_validate_line("LIST TO 50", &err_col));
+    assert(syntax_validate_line("LIST 10 TO", &err_col));
+    assert(syntax_validate_line("LIST TO", &err_col));
 
     printf("test_normalization_and_syntax: PASS\n");
+}
+
+static void test_list_range(void) {
+    Runtime rt;
+    runtime_init(&rt);
+    FILE *out = tmpfile();
+    assert(out != NULL);
+    rt.out = out;
+
+    runtime_process_input(&rt, "10 PRINT \"L10\"", true);
+    runtime_process_input(&rt, "20 PRINT \"L20\"", true);
+    runtime_process_input(&rt, "30 PRINT \"L30\"", true);
+    runtime_process_input(&rt, "40 PRINT \"L40\"", true);
+    runtime_process_input(&rt, "50 PRINT \"L50\"", true);
+
+    char buf[1024];
+
+    // Helper macro to read out buffer
+    #define CAPTURE_LIST(cmd) do { \
+        rewind(out); \
+        ftruncate(fileno(out), 0); \
+        runtime_process_input(&rt, cmd, true); \
+        assert(rt.last_error.code == ERR_OK); \
+        rewind(out); \
+        size_t n = fread(buf, 1, sizeof(buf) - 1, out); \
+        buf[n] = '\0'; \
+    } while (0)
+
+    // 1. LIST 20 TO 40 -> outputs 20, 30, 40
+    CAPTURE_LIST("LIST 20 TO 40");
+    assert(strstr(buf, "10 PRINT") == NULL);
+    assert(strstr(buf, "20 PRINT \"L20\"") != NULL);
+    assert(strstr(buf, "30 PRINT \"L30\"") != NULL);
+    assert(strstr(buf, "40 PRINT \"L40\"") != NULL);
+    assert(strstr(buf, "50 PRINT") == NULL);
+
+    // 2. LIST TO 30 -> outputs 10, 20, 30
+    CAPTURE_LIST("LIST TO 30");
+    assert(strstr(buf, "10 PRINT \"L10\"") != NULL);
+    assert(strstr(buf, "20 PRINT \"L20\"") != NULL);
+    assert(strstr(buf, "30 PRINT \"L30\"") != NULL);
+    assert(strstr(buf, "40 PRINT") == NULL);
+    assert(strstr(buf, "50 PRINT") == NULL);
+
+    // 3. LIST 30 TO -> outputs 30, 40, 50
+    CAPTURE_LIST("LIST 30 TO");
+    assert(strstr(buf, "10 PRINT") == NULL);
+    assert(strstr(buf, "20 PRINT") == NULL);
+    assert(strstr(buf, "30 PRINT \"L30\"") != NULL);
+    assert(strstr(buf, "40 PRINT \"L40\"") != NULL);
+    assert(strstr(buf, "50 PRINT \"L50\"") != NULL);
+
+    // 4. LIST TO -> outputs all lines
+    CAPTURE_LIST("LIST TO");
+    assert(strstr(buf, "10 PRINT \"L10\"") != NULL);
+    assert(strstr(buf, "20 PRINT \"L20\"") != NULL);
+    assert(strstr(buf, "30 PRINT \"L30\"") != NULL);
+    assert(strstr(buf, "40 PRINT \"L40\"") != NULL);
+    assert(strstr(buf, "50 PRINT \"L50\"") != NULL);
+
+    // 5. LIST 20 (without TO) -> outputs 20 to end
+    CAPTURE_LIST("LIST 20");
+    assert(strstr(buf, "10 PRINT") == NULL);
+    assert(strstr(buf, "20 PRINT \"L20\"") != NULL);
+    assert(strstr(buf, "30 PRINT \"L30\"") != NULL);
+    assert(strstr(buf, "40 PRINT \"L40\"") != NULL);
+    assert(strstr(buf, "50 PRINT \"L50\"") != NULL);
+
+    // 6. LIST 20 TO 20 -> outputs only line 20
+    CAPTURE_LIST("LIST 20 TO 20");
+    assert(strstr(buf, "10 PRINT") == NULL);
+    assert(strstr(buf, "20 PRINT \"L20\"") != NULL);
+    assert(strstr(buf, "30 PRINT") == NULL);
+    assert(strstr(buf, "40 PRINT") == NULL);
+    assert(strstr(buf, "50 PRINT") == NULL);
+
+    // 7. LIST 50 TO 20 -> outputs nothing (no program lines, only 0 OK report)
+    CAPTURE_LIST("LIST 50 TO 20");
+    assert(strstr(buf, "PRINT") == NULL);
+
+    #undef CAPTURE_LIST
+
+    // Errors
+    runtime_process_input(&rt, "LIST 10000", true);
+    assert(rt.last_error.code == ERR_INTEGER_RANGE);
+
+    runtime_process_input(&rt, "LIST TO 10000", true);
+    assert(rt.last_error.code == ERR_INTEGER_RANGE);
+
+    runtime_process_input(&rt, "LIST \"str\"", true);
+    assert(rt.last_error.code == ERR_NONSENSE);
+
+    fclose(out);
+    runtime_free(&rt);
+    printf("test_list_range: PASS\n");
 }
 
 int main(void) {
@@ -430,6 +530,7 @@ int main(void) {
     test_cat_feature();
     test_delete_file_feature();
     test_delete_program_lines();
+    test_list_range();
     test_normalization_and_syntax();
     printf("All file management tests passed successfully!\n");
     return 0;
