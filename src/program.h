@@ -31,6 +31,9 @@ bool program_insert_or_replace(Program *p, uint16_t line_no, const char *source)
 // Deletes line matching line_no. Returns true if line was found and deleted, false otherwise.
 bool program_delete(Program *p, uint16_t line_no);
 
+// Deletes all lines with line_no between from and to (inclusive).
+void program_delete_range(Program *p, uint16_t from, uint16_t to);
+
 // Finds exact index of line_no. Returns -1 if not found.
 ssize_t program_find_index(const Program *p, uint16_t line_no);
 

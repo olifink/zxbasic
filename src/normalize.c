@@ -15,6 +15,7 @@ static bool is_zx_keyword(const char *upper) {
         "LOAD", "EDIT", "AUTO", "EXIT", "RENUM",
         "CONTINUE", "VARS", "BREAK",
         "INK", "PAPER", "BRIGHT", "INVERSE", "AT",
+        "MERGE", "CAT", "DELETE", "LINE",
         "AND", "OR", "NOT",
         "ABS", "ACS", "ASN", "ATN", "COS", "EXP", "INT", "LN", "RND",
         "SGN", "SIN", "SQR", "TAN",
@@ -552,6 +553,63 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
             lexer_next(l);
             if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
                 return validate_precedence(l, VPREC_NONE, err_col);
+            }
+            return true;
+
+        case TOKEN_LOAD:
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
+
+        case TOKEN_MERGE:
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
+
+        case TOKEN_SAVE:
+            lexer_next(l);
+            if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+            if (l->current.type == TOKEN_LINE) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    return validate_precedence(l, VPREC_NONE, err_col);
+                }
+            }
+            return true;
+
+        case TOKEN_RUN:
+            lexer_next(l);
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                } else if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                }
+            }
+            return true;
+
+        case TOKEN_CAT:
+            lexer_next(l);
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                return validate_precedence(l, VPREC_NONE, err_col);
+            }
+            return true;
+
+        case TOKEN_DELETE:
+            lexer_next(l);
+            if (l->current.type == TOKEN_TO) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    return validate_precedence(l, VPREC_NONE, err_col);
+                }
+                return true;
+            }
+            if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+            if (l->current.type == TOKEN_TO) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    return validate_precedence(l, VPREC_NONE, err_col);
+                }
             }
             return true;
 

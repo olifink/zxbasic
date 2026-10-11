@@ -75,6 +75,10 @@ typedef enum {
     TOKEN_BRIGHT,
     TOKEN_INVERSE,
     TOKEN_AT,
+    TOKEN_MERGE,
+    TOKEN_CAT,
+    TOKEN_DELETE,
+    TOKEN_LINE,
 
     // Built-in functions
     TOKEN_ABS,

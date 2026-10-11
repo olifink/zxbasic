@@ -652,18 +652,29 @@ static bool parse_goto(Lexer *l, Runtime *rt) {
         return false;
     }
 
-    uint16_t target_line = (uint16_t)floor(target_val.as.num);
+    double d = target_val.as.num;
+    value_free(&target_val);
+    if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+        rt->last_error.code = ERR_INTEGER_RANGE;
+        return false;
+    }
+
+    uint16_t target_line = (uint16_t)d;
     ssize_t idx = program_find_index(&rt->program, target_line);
     if (idx < 0) {
         rt->last_error.code = ERR_INTEGER_RANGE;
         return false;
     }
 
-    rt->jump_requested = true;
-    rt->jump_line_idx = (size_t)idx;
-    rt->jump_stmt_idx = 1;
-    rt->jump_offset = 0;
-    return true;
+    if (rt->is_running) {
+        rt->jump_requested = true;
+        rt->jump_line_idx = (size_t)idx;
+        rt->jump_stmt_idx = 1;
+        rt->jump_offset = 0;
+        return true;
+    } else {
+        return runtime_goto(rt, target_line);
+    }
 }
 
 static bool parse_gosub(Lexer *l, Runtime *rt, size_t next_stmt_offset) {
@@ -1095,11 +1106,15 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
                         rt->last_error.code = ERR_INTEGER_RANGE;
                         return false;
                     }
-                    rt->jump_requested = true;
-                    rt->jump_line_idx = (size_t)idx;
-                    rt->jump_stmt_idx = 1;
-                    rt->jump_offset = 0;
-                    return true;
+                    if (rt->is_running) {
+                        rt->jump_requested = true;
+                        rt->jump_line_idx = (size_t)idx;
+                        rt->jump_stmt_idx = 1;
+                        rt->jump_offset = 0;
+                        return true;
+                    } else {
+                        return runtime_goto(rt, target_line);
+                    }
                 }
                 return parser_execute_statement(l, rt, next_stmt_offset, skip_rest_of_line);
             } else {
@@ -1115,8 +1130,53 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
                 Value v = expr_eval(l, &rt->symtab, &rt->last_error);
                 if (rt->last_error.code != ERR_OK) return false;
-                if (!value_is_num(&v)) { rt->last_error.code = ERR_NONSENSE; return false; }
-                start_line = (uint16_t)floor(v.as.num);
+                if (value_is_str(&v)) {
+                    char path[512];
+                    strncpy(path, v.as.str.chars, sizeof(path) - 1);
+                    path[sizeof(path) - 1] = '\0';
+                    value_free(&v);
+
+                    if (l->current.type == TOKEN_COMMA) {
+                        lexer_next(l);
+                    }
+                    if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                        Value line_v = expr_eval(l, &rt->symtab, &rt->last_error);
+                        if (rt->last_error.code != ERR_OK) return false;
+                        if (!value_is_num(&line_v)) {
+                            value_free(&line_v);
+                            rt->last_error.code = ERR_NONSENSE;
+                            return false;
+                        }
+                        double d = line_v.as.num;
+                        value_free(&line_v);
+                        if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                            rt->last_error.code = ERR_INTEGER_RANGE;
+                            return false;
+                        }
+                        start_line = (uint16_t)d;
+                    }
+
+                    rt->auto_ran = false;
+                    if (!runtime_load(rt, path)) return false;
+                    if (start_line > 0) {
+                        runtime_run(rt, start_line);
+                    } else if (!rt->auto_ran) {
+                        runtime_run(rt, 0);
+                    }
+                    return true;
+                } else if (value_is_num(&v)) {
+                    double d = v.as.num;
+                    value_free(&v);
+                    if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                        rt->last_error.code = ERR_INTEGER_RANGE;
+                        return false;
+                    }
+                    start_line = (uint16_t)d;
+                } else {
+                    value_free(&v);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
             }
             runtime_run(rt, start_line);
             return true;
@@ -1259,8 +1319,42 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             lexer_next(l);
             Value path_val = expr_eval(l, &rt->symtab, &rt->last_error);
             if (rt->last_error.code != ERR_OK) return false;
-            if (!value_is_str(&path_val)) { rt->last_error.code = ERR_NONSENSE; return false; }
-            bool ok = runtime_save(rt, path_val.as.str.chars);
+            if (!value_is_str(&path_val)) {
+                value_free(&path_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+
+            bool has_line = false;
+            uint16_t line_no = 0;
+
+            if (l->current.type == TOKEN_LINE) {
+                has_line = true;
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    Value line_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                    if (rt->last_error.code != ERR_OK) {
+                        value_free(&path_val);
+                        return false;
+                    }
+                    if (!value_is_num(&line_val)) {
+                        value_free(&line_val);
+                        value_free(&path_val);
+                        rt->last_error.code = ERR_NONSENSE;
+                        return false;
+                    }
+                    double d = line_val.as.num;
+                    value_free(&line_val);
+                    if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                        value_free(&path_val);
+                        rt->last_error.code = ERR_INTEGER_RANGE;
+                        return false;
+                    }
+                    line_no = (uint16_t)d;
+                }
+            }
+
+            bool ok = runtime_save_ext(rt, path_val.as.str.chars, has_line, line_no);
             value_free(&path_val);
             return ok;
         }
@@ -1273,6 +1367,137 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             bool ok = runtime_load(rt, path_val.as.str.chars);
             value_free(&path_val);
             return ok;
+        }
+
+        case TOKEN_MERGE: {
+            lexer_next(l);
+            Value path_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_str(&path_val)) {
+                value_free(&path_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            bool ok = runtime_merge(rt, path_val.as.str.chars);
+            value_free(&path_val);
+            return ok;
+        }
+
+        case TOKEN_CAT: {
+            lexer_next(l);
+            const char *path = NULL;
+            Value path_val;
+            bool has_path = false;
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                path_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_str(&path_val)) {
+                    value_free(&path_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                path = path_val.as.str.chars;
+                has_path = true;
+            }
+            bool ok = runtime_cat(rt, path);
+            if (has_path) {
+                value_free(&path_val);
+            }
+            return ok;
+        }
+
+        case TOKEN_DELETE: {
+            lexer_next(l);
+            if (l->current.type == TOKEN_TO) {
+                // DELETE TO [to]
+                uint16_t from = MIN_LINE_NO;
+                uint16_t to = MAX_LINE_NO;
+                lexer_next(l);
+                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                    Value to_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                    if (rt->last_error.code != ERR_OK) return false;
+                    if (!value_is_num(&to_val)) {
+                        value_free(&to_val);
+                        rt->last_error.code = ERR_NONSENSE;
+                        return false;
+                    }
+                    double d_to = to_val.as.num;
+                    value_free(&to_val);
+                    if (d_to < MIN_LINE_NO || d_to > MAX_LINE_NO || floor(d_to) != d_to) {
+                        rt->last_error.code = ERR_INTEGER_RANGE;
+                        return false;
+                    }
+                    to = (uint16_t)d_to;
+                }
+                if (rt->is_running) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                if (from <= to) {
+                    program_delete_range(&rt->program, from, to);
+                }
+                return true;
+            }
+
+            if (l->current.type == TOKEN_EOF || l->current.type == TOKEN_COLON) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+
+            Value first_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+
+            if (value_is_str(&first_val)) {
+                // Filesystem file deletion
+                bool ok = runtime_delete_file(rt, first_val.as.str.chars);
+                value_free(&first_val);
+                return ok;
+            } else if (value_is_num(&first_val)) {
+                // Program line range deletion
+                double d_from = first_val.as.num;
+                value_free(&first_val);
+                if (d_from < MIN_LINE_NO || d_from > MAX_LINE_NO || floor(d_from) != d_from) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                uint16_t from = (uint16_t)d_from;
+                uint16_t to = from;
+
+                if (l->current.type == TOKEN_TO) {
+                    lexer_next(l);
+                    if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                        Value to_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                        if (rt->last_error.code != ERR_OK) return false;
+                        if (!value_is_num(&to_val)) {
+                            value_free(&to_val);
+                            rt->last_error.code = ERR_NONSENSE;
+                            return false;
+                        }
+                        double d_to = to_val.as.num;
+                        value_free(&to_val);
+                        if (d_to < MIN_LINE_NO || d_to > MAX_LINE_NO || floor(d_to) != d_to) {
+                            rt->last_error.code = ERR_INTEGER_RANGE;
+                            return false;
+                        }
+                        to = (uint16_t)d_to;
+                    } else {
+                        to = MAX_LINE_NO;
+                    }
+                }
+
+                if (rt->is_running) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                if (from <= to) {
+                    program_delete_range(&rt->program, from, to);
+                }
+                return true;
+            } else {
+                value_free(&first_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
         }
 
         case TOKEN_EDIT: {

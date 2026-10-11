@@ -78,6 +78,10 @@ const char *token_type_name(TokenType t) {
         case TOKEN_BRIGHT: return "BRIGHT";
         case TOKEN_INVERSE: return "INVERSE";
         case TOKEN_AT: return "AT";
+        case TOKEN_MERGE: return "MERGE";
+        case TOKEN_CAT: return "CAT";
+        case TOKEN_DELETE: return "DELETE";
+        case TOKEN_LINE: return "LINE";
         case TOKEN_ABS: return "ABS";
         case TOKEN_ACS: return "ACS";
         case TOKEN_ASN: return "ASN";
@@ -174,6 +178,10 @@ static TokenType match_keyword(const char *upper) {
     if (strcmp(upper, "BRIGHT") == 0) return TOKEN_BRIGHT;
     if (strcmp(upper, "INVERSE") == 0) return TOKEN_INVERSE;
     if (strcmp(upper, "AT") == 0) return TOKEN_AT;
+    if (strcmp(upper, "MERGE") == 0) return TOKEN_MERGE;
+    if (strcmp(upper, "CAT") == 0) return TOKEN_CAT;
+    if (strcmp(upper, "DELETE") == 0) return TOKEN_DELETE;
+    if (strcmp(upper, "LINE") == 0) return TOKEN_LINE;
 
     if (strcmp(upper, "AND") == 0) return TOKEN_AND;
     if (strcmp(upper, "OR") == 0) return TOKEN_OR;

@@ -89,6 +89,7 @@ typedef struct Runtime {
     ConsoleTermAttrs term_attrs;
     bool ink_explicitly_set;
     bool paper_explicitly_set;
+    bool auto_ran;
     FILE *out;
     FILE *in;
 } Runtime;
@@ -103,6 +104,7 @@ bool runtime_has_breakpoint(const Runtime *rt, uint16_t line_no);
 void runtime_clear_breakpoints(Runtime *rt);
 bool runtime_continue(Runtime *rt, uint16_t temp_stop_line);
 void runtime_vars(Runtime *rt);
+bool runtime_goto(Runtime *rt, uint16_t target_line);
 
 // Resets runtime state for RUN
 void runtime_reset_for_run(Runtime *rt, uint16_t start_line);
@@ -118,8 +120,12 @@ void runtime_run(Runtime *rt, uint16_t start_line);
 // Returns true on success, false on error/rejection.
 bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive);
 
-// Persistence
+// Persistence & Filesystem
 bool runtime_save(Runtime *rt, const char *path);
+bool runtime_save_ext(Runtime *rt, const char *path, bool has_line, uint16_t line_no);
 bool runtime_load(Runtime *rt, const char *path);
+bool runtime_merge(Runtime *rt, const char *path);
+bool runtime_cat(Runtime *rt, const char *subpath);
+bool runtime_delete_file(Runtime *rt, const char *path);
 
 #endif // ZXBASIC_RUNTIME_H

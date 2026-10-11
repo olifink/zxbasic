@@ -108,6 +108,24 @@ bool program_delete(Program *p, uint16_t line_no) {
     return true;
 }
 
+void program_delete_range(Program *p, uint16_t from, uint16_t to) {
+    if (!p || p->count == 0 || from > to) return;
+
+    size_t write_idx = 0;
+    for (size_t read_idx = 0; read_idx < p->count; ++read_idx) {
+        uint16_t line_no = p->lines[read_idx].line_no;
+        if (line_no >= from && line_no <= to) {
+            free(p->lines[read_idx].source);
+        } else {
+            if (write_idx != read_idx) {
+                p->lines[write_idx] = p->lines[read_idx];
+            }
+            write_idx++;
+        }
+    }
+    p->count = write_idx;
+}
+
 ssize_t program_find_index(const Program *p, uint16_t line_no) {
     if (!p || p->count == 0) return -1;
     bool found = false;

@@ -5,8 +5,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <math.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "normalize.h"
 
@@ -80,6 +84,7 @@ void runtime_clear(Runtime *rt) {
     rt->cont_stmt_idx = 1;
     rt->temp_stop_line = 0;
     rt->breakpoint_count = 0;
+    rt->auto_ran = false;
 }
 
 void runtime_free(Runtime *rt) {
@@ -99,6 +104,7 @@ void runtime_reset_for_run(Runtime *rt, uint16_t start_line) {
     rt->jump_requested = false;
     rt->call_sp = 0;
     rt->for_sp = 0;
+    rt->auto_ran = true;
     sysvar_set_int(&rt->sysvars, "ATTR_T_INK", ATTR_INACTIVE);
     sysvar_set_int(&rt->sysvars, "ATTR_T_PAPER", ATTR_INACTIVE);
     sysvar_set_int(&rt->sysvars, "ATTR_T_BRIGHT", ATTR_INACTIVE);
@@ -533,6 +539,49 @@ bool runtime_continue(Runtime *rt, uint16_t temp_stop_line) {
     return (rt->last_error.code == ERR_OK || rt->last_error.code == ERR_STOP);
 }
 
+bool runtime_goto(Runtime *rt, uint16_t target_line) {
+    if (!rt || rt->program.count == 0) return false;
+
+    ssize_t idx = program_find_index(&rt->program, target_line);
+    if (idx < 0) {
+        rt->last_error.code = ERR_INTEGER_RANGE;
+        rt->last_error.line_no = target_line;
+        rt->last_error.stmt_index = 1;
+        return false;
+    }
+
+    rt->is_running = true;
+    rt->stop_requested = false;
+    rt->jump_requested = false;
+    rt->call_sp = 0;
+    rt->for_sp = 0;
+    rt->can_continue = false;
+    rt->temp_stop_line = 0;
+
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INK", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_PAPER", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_BRIGHT", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "ATTR_T_INVERSE", ATTR_INACTIVE);
+    sysvar_set_int(&rt->sysvars, "S_POSN_ROW", 0);
+    sysvar_set_int(&rt->sysvars, "S_POSN_COL", 0);
+
+    if (!rt->data_initialized) {
+        rt->data_line_idx = (size_t)idx;
+        rt->data_offset = 0;
+        rt->data_initialized = true;
+    }
+
+    rt->cur_line_idx = (size_t)idx;
+    rt->cur_stmt_idx = 1;
+    rt->cur_offset = 0;
+    rt->print_col = 0;
+    rt->last_error.code = ERR_OK;
+    rt->last_error.custom_msg = NULL;
+
+    runtime_run_loop(rt, false);
+    return (rt->last_error.code == ERR_OK || rt->last_error.code == ERR_STOP);
+}
+
 bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) {
     if (!rt || !raw_line) return false;
 
@@ -620,7 +669,7 @@ bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
     }
 }
 
-bool runtime_save(Runtime *rt, const char *path) {
+bool runtime_save_ext(Runtime *rt, const char *path, bool has_line, uint16_t line_no) {
     if (!rt || !path) return false;
     FILE *f = fopen(path, "w");
     if (!f) {
@@ -629,8 +678,19 @@ bool runtime_save(Runtime *rt, const char *path) {
     }
 
     program_list(&rt->program, 0, f);
+    if (has_line) {
+        if (line_no == 0) {
+            fprintf(f, "RUN\n");
+        } else {
+            fprintf(f, "RUN %u\n", (unsigned int)line_no);
+        }
+    }
     fclose(f);
     return true;
+}
+
+bool runtime_save(Runtime *rt, const char *path) {
+    return runtime_save_ext(rt, path, false, 0);
 }
 
 bool runtime_load(Runtime *rt, const char *path) {
@@ -643,6 +703,7 @@ bool runtime_load(Runtime *rt, const char *path) {
 
     program_clear(&rt->program);
     runtime_clear(rt);
+    rt->auto_ran = false;
 
     char line_buf[2048];
     while (fgets(line_buf, sizeof(line_buf), f)) {
@@ -650,5 +711,116 @@ bool runtime_load(Runtime *rt, const char *path) {
     }
 
     fclose(f);
+    return true;
+}
+
+bool runtime_merge(Runtime *rt, const char *path) {
+    if (!rt || !path) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    char line_buf[2048];
+    while (fgets(line_buf, sizeof(line_buf), f)) {
+        const char *p = line_buf;
+        while (*p && isspace((unsigned char)*p)) p++;
+        // Ingest only numbered lines; ignore unnumbered direct commands
+        if (*p != '\0' && isdigit((unsigned char)*p)) {
+            runtime_process_input(rt, line_buf, false);
+        }
+    }
+
+    fclose(f);
+    return true;
+}
+
+typedef struct {
+    char name[256];
+    bool is_dir;
+    long long size;
+} CatEntry;
+
+static int compare_cat_entries(const void *a, const void *b) {
+    const CatEntry *ea = (const CatEntry *)a;
+    const CatEntry *eb = (const CatEntry *)b;
+    return strcasecmp(ea->name, eb->name);
+}
+
+bool runtime_cat(Runtime *rt, const char *subpath) {
+    if (!rt) return false;
+    const char *dir_path = (subpath && subpath[0] != '\0') ? subpath : ".";
+
+    DIR *d = opendir(dir_path);
+    if (!d) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    CatEntry *entries = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+
+        if (count >= cap) {
+            cap = (cap == 0) ? 16 : cap * 2;
+            CatEntry *new_entries = realloc(entries, cap * sizeof(CatEntry));
+            if (!new_entries) {
+                free(entries);
+                closedir(d);
+                rt->last_error.code = ERR_OUT_OF_MEMORY;
+                return false;
+            }
+            entries = new_entries;
+        }
+
+        strncpy(entries[count].name, de->d_name, sizeof(entries[count].name) - 1);
+        entries[count].name[sizeof(entries[count].name) - 1] = '\0';
+
+        char full_path[1024];
+        if (strcmp(dir_path, ".") == 0) {
+            snprintf(full_path, sizeof(full_path), "%s", de->d_name);
+        } else {
+            snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, de->d_name);
+        }
+
+        struct stat st;
+        if (stat(full_path, &st) == 0) {
+            entries[count].is_dir = S_ISDIR(st.st_mode);
+            entries[count].size = (long long)st.st_size;
+        } else {
+            entries[count].is_dir = false;
+            entries[count].size = 0;
+        }
+        count++;
+    }
+    closedir(d);
+
+    if (count > 1) {
+        qsort(entries, count, sizeof(CatEntry), compare_cat_entries);
+    }
+
+    fprintf(rt->out, "Directory of %s:\n", dir_path);
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].is_dir) {
+            fprintf(rt->out, "  [DIR]  %s/\n", entries[i].name);
+        } else {
+            fprintf(rt->out, "  [FILE] %-20s %lld bytes\n", entries[i].name, entries[i].size);
+        }
+    }
+    free(entries);
+    return true;
+}
+
+bool runtime_delete_file(Runtime *rt, const char *path) {
+    if (!rt || !path) return false;
+    if (unlink(path) != 0) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
     return true;
 }

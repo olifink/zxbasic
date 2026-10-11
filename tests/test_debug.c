@@ -471,6 +471,76 @@ static void test_debug_syntax_and_normalization(void) {
     printf("test_debug_syntax_and_normalization: PASS\n");
 }
 
+static void test_interactive_goto(void) {
+    Runtime rt;
+    runtime_init(&rt);
+    FILE *out = tmpfile();
+    assert(out != NULL);
+    rt.out = out;
+
+    // 10 PRINT "A="; A; " B$="; B$
+    // 20 LET A = A + 1: LET B$ = "Modified"
+    // 30 STOP
+    runtime_process_input(&rt, "10 PRINT \"A=\"; A; \" B$=\"; B$", true);
+    runtime_process_input(&rt, "20 LET A = A + 1: LET B$ = \"Modified\"", true);
+    runtime_process_input(&rt, "30 STOP", true);
+
+    // Set initial variables in direct mode
+    runtime_process_input(&rt, "LET A = 42: LET B$ = \"Initial\"", true);
+
+    rewind(out);
+    ftruncate(fileno(out), 0);
+
+    // GOTO 10 interactively - preserves variables!
+    runtime_process_input(&rt, "GOTO 10", true);
+    assert(rt.last_error.code == ERR_STOP);
+
+    rewind(out);
+    char buf[512];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, out);
+    buf[n] = '\0';
+    assert(strstr(buf, "A=42 B$=Initial") != NULL);
+
+    // Verify variables were modified by line 20
+    double val_a = 0;
+    const char *val_b = NULL;
+    size_t len_b = 0;
+    assert(symtab_get_num(&rt.symtab, "A", &val_a) && val_a == 43.0);
+    assert(symtab_get_str(&rt.symtab, "B$", &val_b, &len_b) && strcmp(val_b, "Modified") == 0);
+
+    // GOTO 10 again - continues with current modified variables A=43 B$=Modified
+    rewind(out);
+    ftruncate(fileno(out), 0);
+
+    runtime_process_input(&rt, "GOTO 10", true);
+    assert(rt.last_error.code == ERR_STOP);
+
+    rewind(out);
+    n = fread(buf, 1, sizeof(buf) - 1, out);
+    buf[n] = '\0';
+    assert(strstr(buf, "A=43 B$=Modified") != NULL);
+
+    // In contrast, RUN 10 clears variables!
+    rewind(out);
+    ftruncate(fileno(out), 0);
+
+    runtime_process_input(&rt, "RUN 10", true);
+    // Since RUN clears variables, evaluating A in line 10 raises ERR_VAR_NOT_FOUND
+    assert(rt.last_error.code == ERR_VAR_NOT_FOUND);
+    assert(!symtab_get_num(&rt.symtab, "A", &val_a));
+
+    // GOTO with invalid target
+    runtime_process_input(&rt, "GOTO 999", true);
+    assert(rt.last_error.code == ERR_INTEGER_RANGE);
+
+    runtime_process_input(&rt, "GOTO -5", true);
+    assert(rt.last_error.code == ERR_INTEGER_RANGE);
+
+    fclose(out);
+    runtime_free(&rt);
+    printf("test_interactive_goto: PASS\n");
+}
+
 int main(void) {
     test_continue_after_stop();
     test_continue_multi_statement_line();
@@ -481,6 +551,7 @@ int main(void) {
     test_inline_break_statement();
     test_vars_keyword();
     test_debug_syntax_and_normalization();
+    test_interactive_goto();
     printf("All debug tests passed successfully!\n");
     return 0;
 }

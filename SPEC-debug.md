@@ -104,9 +104,23 @@ When program execution halts, the runtime updates continuation tracking (`rt->ca
 
 ---
 
-## 5. Architectural Runtime Changes
+## 5. Interactive Program Execution: `GOTO line`
 
-### 5.1 Runtime Struct Additions (`src/runtime.h`)
+### 5.1 Syntax & Direct Mode Semantics
+* **Syntax:** `GOTO line_expr` (always requires a line number or numeric expression; missing argument raises `C Nonsense in BASIC`).
+* **Availability:** Valid both as an in-program statement and interactively in immediate mode.
+
+### 5.2 Variable Preservation vs. `RUN`
+* When executed in direct/immediate mode, `GOTO line` starts program execution beginning at the designated target line, running continuously until program termination (`0 OK`), an error, a `STOP`, or a breakpoint.
+* **Preservation of Variables:** Unlike `RUN [line]` (which resets the symbol table via `symtab_clear`), direct mode `GOTO line` **preserves all current variables** in `rt->symtab`. Existing scalar variables and dimensioned arrays retain their values and state.
+* **Stack & Attribute Reset:** Resets call stack (`call_sp = 0`), loop stack (`for_sp = 0`), and temporary stream attributes (`ATTR_T_*`), while leaving user variables and data pointers intact.
+* **Error Handling:** If the target line does not exist in `rt->program` (or evaluates outside `1..9999`), raises `B Integer out of range`.
+
+---
+
+## 6. Architectural Runtime Changes
+
+### 6.1 Runtime Struct Additions (`src/runtime.h`)
 ```c
 #define MAX_BREAKPOINTS 64
 
@@ -125,7 +139,7 @@ typedef struct Runtime {
 } Runtime;
 ```
 
-### 5.2 Lexer & Normalizer Updates
+### 6.2 Lexer & Normalizer Updates
 * Tokens: `TOKEN_CONTINUE`, `TOKEN_VARS`, `TOKEN_BREAK`.
 * Keywords added to `is_zx_keyword`: `"CONTINUE"`, `"VARS"`, `"BREAK"`.
 * Syntax validation rules for `CONTINUE [expr]`, `VARS`, and `BREAK [line [, line...]]`.
