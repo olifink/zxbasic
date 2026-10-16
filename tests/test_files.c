@@ -271,7 +271,7 @@ static void test_cat_feature(void) {
     printf("test_cat_feature: PASS\n");
 }
 
-static void test_delete_file_feature(void) {
+static void test_erase_file_feature(void) {
     Runtime rt;
     runtime_init(&rt);
     FILE *out = tmpfile();
@@ -281,51 +281,51 @@ static void test_delete_file_feature(void) {
     const char *temp_file = "test_del_temp.bas";
     FILE *f = fopen(temp_file, "w");
     assert(f != NULL);
-    fprintf(f, "10 PRINT \"DELETE ME\"\n");
+    fprintf(f, "10 PRINT \"ERASE ME\"\n");
     fclose(f);
 
     // Verify file exists
     assert(access(temp_file, F_OK) == 0);
 
-    // DELETE "test_del_temp.bas"
-    runtime_process_input(&rt, "DELETE \"test_del_temp.bas\"", true);
+    // ERASE "test_del_temp.bas"
+    runtime_process_input(&rt, "ERASE \"test_del_temp.bas\"", true);
     assert(rt.last_error.code == ERR_OK);
 
     // Verify file was deleted
     assert(access(temp_file, F_OK) != 0);
 
-    // DELETE non-existent file reports error
-    runtime_process_input(&rt, "DELETE \"nonexistent_del_file.bas\"", true);
+    // ERASE non-existent file reports error
+    runtime_process_input(&rt, "ERASE \"nonexistent_del_file.bas\"", true);
     assert(rt.last_error.code == ERR_NONSENSE);
 
-    // DELETE with string variable expression
+    // ERASE with string variable expression
     f = fopen(temp_file, "w");
     fprintf(f, "10 REM\n");
     fclose(f);
     assert(access(temp_file, F_OK) == 0);
 
     runtime_process_input(&rt, "LET F$ = \"test_del_temp.bas\"", true);
-    runtime_process_input(&rt, "DELETE F$", true);
+    runtime_process_input(&rt, "ERASE F$", true);
     assert(rt.last_error.code == ERR_OK);
     assert(access(temp_file, F_OK) != 0);
 
-    // Programmatic DELETE file inside a running program is allowed
+    // Programmatic ERASE file inside a running program is allowed
     f = fopen(temp_file, "w");
     fprintf(f, "10 REM\n");
     fclose(f);
     assert(access(temp_file, F_OK) == 0);
 
-    runtime_process_input(&rt, "10 DELETE \"test_del_temp.bas\"", true);
+    runtime_process_input(&rt, "10 ERASE \"test_del_temp.bas\"", true);
     runtime_process_input(&rt, "RUN", true);
     assert(rt.last_error.code == ERR_OK);
     assert(access(temp_file, F_OK) != 0);
 
     fclose(out);
     runtime_free(&rt);
-    printf("test_delete_file_feature: PASS\n");
+    printf("test_erase_file_feature: PASS\n");
 }
 
-static void test_delete_program_lines(void) {
+static void test_erase_program_lines(void) {
     Runtime rt;
     runtime_init(&rt);
     FILE *out = tmpfile();
@@ -343,39 +343,39 @@ static void test_delete_program_lines(void) {
         assert(rt.program.count == 5); \
     } while (0)
 
-    // 1. DELETE 20 TO 40 -> leaves 10, 50
+    // 1. ERASE 20 TO 40 -> leaves 10, 50
     SETUP_LINES();
-    runtime_process_input(&rt, "DELETE 20 TO 40", true);
+    runtime_process_input(&rt, "ERASE 20 TO 40", true);
     assert(rt.last_error.code == ERR_OK);
     assert(rt.program.count == 2);
     assert(rt.program.lines[0].line_no == 10);
     assert(rt.program.lines[1].line_no == 50);
 
-    // 2. DELETE TO 30 -> leaves 40, 50
+    // 2. ERASE TO 30 -> leaves 40, 50
     SETUP_LINES();
-    runtime_process_input(&rt, "DELETE TO 30", true);
+    runtime_process_input(&rt, "ERASE TO 30", true);
     assert(rt.last_error.code == ERR_OK);
     assert(rt.program.count == 2);
     assert(rt.program.lines[0].line_no == 40);
     assert(rt.program.lines[1].line_no == 50);
 
-    // 3. DELETE 30 TO -> leaves 10, 20
+    // 3. ERASE 30 TO -> leaves 10, 20
     SETUP_LINES();
-    runtime_process_input(&rt, "DELETE 30 TO", true);
+    runtime_process_input(&rt, "ERASE 30 TO", true);
     assert(rt.last_error.code == ERR_OK);
     assert(rt.program.count == 2);
     assert(rt.program.lines[0].line_no == 10);
     assert(rt.program.lines[1].line_no == 20);
 
-    // 4. DELETE TO -> leaves 0 lines
+    // 4. ERASE TO -> leaves 0 lines
     SETUP_LINES();
-    runtime_process_input(&rt, "DELETE TO", true);
+    runtime_process_input(&rt, "ERASE TO", true);
     assert(rt.last_error.code == ERR_OK);
     assert(rt.program.count == 0);
 
-    // 5. DELETE 30 (single line shorthand) -> deletes only line 30
+    // 5. ERASE 30 (single line shorthand) -> deletes only line 30
     SETUP_LINES();
-    runtime_process_input(&rt, "DELETE 30", true);
+    runtime_process_input(&rt, "ERASE 30", true);
     assert(rt.last_error.code == ERR_OK);
     assert(rt.program.count == 4);
     assert(rt.program.lines[0].line_no == 10);
@@ -383,9 +383,9 @@ static void test_delete_program_lines(void) {
     assert(rt.program.lines[2].line_no == 40);
     assert(rt.program.lines[3].line_no == 50);
 
-    // 6. DELETE lines inside running program is forbidden (raises ERR_NONSENSE)
+    // 6. ERASE lines inside running program is forbidden (raises ERR_NONSENSE)
     SETUP_LINES();
-    runtime_process_input(&rt, "60 DELETE 10 TO 20", true);
+    runtime_process_input(&rt, "60 ERASE 10 TO 20", true);
     runtime_process_input(&rt, "RUN 60", true);
     assert(rt.last_error.code == ERR_NONSENSE);
 
@@ -393,13 +393,13 @@ static void test_delete_program_lines(void) {
 
     fclose(out);
     runtime_free(&rt);
-    printf("test_delete_program_lines: PASS\n");
+    printf("test_erase_program_lines: PASS\n");
 }
 
 static void test_normalization_and_syntax(void) {
     // Keywords auto-capitalization
-    char *n1 = normalize_keywords("merge \"test.bas\": cat \"dir\": delete 10 to 50");
-    assert(strcmp(n1, "MERGE \"test.bas\": CAT \"dir\": DELETE 10 TO 50") == 0);
+    char *n1 = normalize_keywords("merge \"test.bas\": cat \"dir\": erase 10 to 50");
+    assert(strcmp(n1, "MERGE \"test.bas\": CAT \"dir\": ERASE 10 TO 50") == 0);
     free(n1);
 
     char *n2 = normalize_keywords("save \"backup.bas\" line 100");
@@ -415,9 +415,9 @@ static void test_normalization_and_syntax(void) {
     assert(syntax_validate_line("SAVE \"test.bas\" LINE", &err_col));
     assert(syntax_validate_line("RUN \"test.bas\", 10", &err_col));
     assert(syntax_validate_line("RUN \"test.bas\"", &err_col));
-    assert(syntax_validate_line("DELETE \"file.bas\"", &err_col));
-    assert(syntax_validate_line("DELETE 10 TO 50", &err_col));
-    assert(syntax_validate_line("DELETE TO 50", &err_col));
+    assert(syntax_validate_line("ERASE \"file.bas\"", &err_col));
+    assert(syntax_validate_line("ERASE 10 TO 50", &err_col));
+    assert(syntax_validate_line("ERASE TO 50", &err_col));
     assert(syntax_validate_line("LIST", &err_col));
     assert(syntax_validate_line("LIST 10", &err_col));
     assert(syntax_validate_line("LIST 10 TO 50", &err_col));
@@ -528,8 +528,8 @@ int main(void) {
     test_save_line_autorun();
     test_run_with_file_and_line();
     test_cat_feature();
-    test_delete_file_feature();
-    test_delete_program_lines();
+    test_erase_file_feature();
+    test_erase_program_lines();
     test_list_range();
     test_normalization_and_syntax();
     printf("All file management tests passed successfully!\n");

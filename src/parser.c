@@ -336,8 +336,50 @@ static bool parse_let(Lexer *l, Runtime *rt) {
 static bool parse_print(Lexer *l, Runtime *rt) {
     lexer_next(l); // consume PRINT
 
+    int channel_no = 2;
+    FILE *dest_fp = rt->out;
+    bool is_channel = false;
+
+    if (l->current.type == TOKEN_HASH) {
+        lexer_next(l);
+        Value ch_val = expr_eval(l, &rt->symtab, &rt->last_error);
+        if (rt->last_error.code != ERR_OK) return false;
+        if (!value_is_num(&ch_val)) {
+            value_free(&ch_val);
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        double d_ch = ch_val.as.num;
+        value_free(&ch_val);
+        if (d_ch < 0 || d_ch >= MAX_CHANNELS || floor(d_ch) != d_ch) {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+            return false;
+        }
+        channel_no = (int)d_ch;
+        is_channel = true;
+
+        if (channel_no < 0 || channel_no >= MAX_CHANNELS || !rt->channels[channel_no].is_open) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        if (rt->channels[channel_no].mode == CHANNEL_MODE_READ) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        dest_fp = rt->channels[channel_no].fp ? rt->channels[channel_no].fp : (channel_no == 2 ? rt->out : (channel_no == 3 ? stderr : NULL));
+        if (!dest_fp) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+
+        if (l->current.type == TOKEN_COMMA || l->current.type == TOKEN_SEMICOLON) {
+            lexer_next(l);
+        }
+    }
+
     bool ended_with_separator = false;
     bool modified_temp_attrs = false;
+    int ch_col = 0;
 
     while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
         if (l->current.type == TOKEN_SEMICOLON) {
@@ -347,17 +389,41 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
         if (l->current.type == TOKEN_COMMA) {
             ended_with_separator = true;
-            print_tab(rt);
+            if (is_channel && channel_no != 2) {
+                int next_tab = ((ch_col / 16) + 1) * 16;
+                int spaces = next_tab - ch_col;
+                for (int sp = 0; sp < spaces; sp++) fputc(' ', dest_fp);
+                ch_col = next_tab;
+            } else {
+                print_tab(rt);
+            }
             lexer_next(l);
             continue;
         }
         if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            print_newline(rt);
+            if (is_channel && channel_no != 2) {
+                fputc('\n', dest_fp);
+                ch_col = 0;
+            } else {
+                print_newline(rt);
+            }
             lexer_next(l);
             continue;
         }
         if (l->current.type == TOKEN_AT) {
+            if (is_channel && channel_no != 2) {
+                lexer_next(l);
+                Value rv = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) goto cleanup;
+                value_free(&rv);
+                if (l->current.type != TOKEN_COMMA) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+                lexer_next(l);
+                Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) goto cleanup;
+                value_free(&cv);
+                continue;
+            }
             ended_with_separator = false;
             lexer_next(l); // consume AT
             Value row_v = expr_eval(l, &rt->symtab, &rt->last_error);
@@ -374,52 +440,20 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             }
             continue;
         }
-        if (l->current.type == TOKEN_INK) {
-            ended_with_separator = false;
-            lexer_next(l); // consume INK
-            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
+        if (l->current.type == TOKEN_INK || l->current.type == TOKEN_PAPER ||
+            l->current.type == TOKEN_BRIGHT || l->current.type == TOKEN_INVERSE) {
+            TokenType attr_tok = l->current.type;
+            lexer_next(l);
+            Value val = expr_eval(l, &rt->symtab, &rt->last_error);
             if (rt->last_error.code != ERR_OK) goto cleanup;
-            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
-            if (!console_set_temporary_ink(rt, (int64_t)floor(cv.as.num), &rt->last_error)) {
-                goto cleanup;
+            if (!value_is_num(&val)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
+            if (!is_channel || channel_no == 2) {
+                if (attr_tok == TOKEN_INK) console_set_temporary_ink(rt, (int64_t)floor(val.as.num), &rt->last_error);
+                else if (attr_tok == TOKEN_PAPER) console_set_temporary_paper(rt, (int64_t)floor(val.as.num), &rt->last_error);
+                else if (attr_tok == TOKEN_BRIGHT) console_set_temporary_bright(rt, (int64_t)floor(val.as.num), &rt->last_error);
+                else if (attr_tok == TOKEN_INVERSE) console_set_temporary_inverse(rt, (int64_t)floor(val.as.num), &rt->last_error);
+                modified_temp_attrs = true;
             }
-            modified_temp_attrs = true;
-            continue;
-        }
-        if (l->current.type == TOKEN_PAPER) {
-            ended_with_separator = false;
-            lexer_next(l); // consume PAPER
-            Value cv = expr_eval(l, &rt->symtab, &rt->last_error);
-            if (rt->last_error.code != ERR_OK) goto cleanup;
-            if (!value_is_num(&cv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
-            if (!console_set_temporary_paper(rt, (int64_t)floor(cv.as.num), &rt->last_error)) {
-                goto cleanup;
-            }
-            modified_temp_attrs = true;
-            continue;
-        }
-        if (l->current.type == TOKEN_BRIGHT) {
-            ended_with_separator = false;
-            lexer_next(l); // consume BRIGHT
-            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
-            if (rt->last_error.code != ERR_OK) goto cleanup;
-            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
-            if (!console_set_temporary_bright(rt, (int64_t)floor(fv.as.num), &rt->last_error)) {
-                goto cleanup;
-            }
-            modified_temp_attrs = true;
-            continue;
-        }
-        if (l->current.type == TOKEN_INVERSE) {
-            ended_with_separator = false;
-            lexer_next(l); // consume INVERSE
-            Value fv = expr_eval(l, &rt->symtab, &rt->last_error);
-            if (rt->last_error.code != ERR_OK) goto cleanup;
-            if (!value_is_num(&fv)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
-            if (!console_set_temporary_inverse(rt, (int64_t)floor(fv.as.num), &rt->last_error)) {
-                goto cleanup;
-            }
-            modified_temp_attrs = true;
             continue;
         }
 
@@ -429,7 +463,13 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
 
         char *s = value_to_str(&v);
-        print_chars(rt, s, strlen(s));
+        size_t slen = strlen(s);
+        if (is_channel && channel_no != 2) {
+            fputs(s, dest_fp);
+            ch_col += (int)slen;
+        } else {
+            print_chars(rt, s, slen);
+        }
         free(s);
         value_free(&v);
 
@@ -441,19 +481,35 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             lexer_next(l);
         } else if (l->current.type == TOKEN_COMMA) {
             ended_with_separator = true;
-            print_tab(rt);
+            if (is_channel && channel_no != 2) {
+                int next_tab = ((ch_col / 16) + 1) * 16;
+                int spaces = next_tab - ch_col;
+                for (int sp = 0; sp < spaces; sp++) fputc(' ', dest_fp);
+                ch_col = next_tab;
+            } else {
+                print_tab(rt);
+            }
             lexer_next(l);
         } else if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            print_newline(rt);
+            if (is_channel && channel_no != 2) {
+                fputc('\n', dest_fp);
+                ch_col = 0;
+            } else {
+                print_newline(rt);
+            }
             lexer_next(l);
         }
     }
 
     if (!ended_with_separator) {
-        print_newline(rt);
+        if (is_channel && channel_no != 2) {
+            fputc('\n', dest_fp);
+        } else {
+            print_newline(rt);
+        }
     }
-    fflush(rt->out);
+    fflush(dest_fp);
 
     if (modified_temp_attrs) {
         console_reset_temporary_attrs(rt);
@@ -467,8 +523,161 @@ cleanup:
     return false;
 }
 
+static bool channel_read_item(FILE *fp, bool is_str, const char *var_name, Runtime *rt) {
+    int c;
+    // Skip leading whitespace (spaces, tabs, newlines, CR)
+    while ((c = fgetc(fp)) != EOF) {
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            break;
+        }
+    }
+    if (c == EOF) {
+        rt->last_error.code = ERR_END_OF_DATA;
+        return false;
+    }
+
+    if (is_str) {
+        char buf[2048];
+        size_t len = 0;
+        if (c == '"') {
+            // Quoted string: read until closing quote or newline/EOF
+            while ((c = fgetc(fp)) != EOF && c != '"' && c != '\n' && c != '\r') {
+                if (len + 1 < sizeof(buf)) {
+                    buf[len++] = (char)c;
+                }
+            }
+            if (c == '"') {
+                int next = fgetc(fp);
+                if (next != ',' && next != EOF) {
+                    ungetc(next, fp);
+                }
+            }
+        } else {
+            // Unquoted string: read until comma, tab, 2+ consecutive spaces, newline, or EOF
+            buf[len++] = (char)c;
+            while ((c = fgetc(fp)) != EOF && c != ',' && c != '\t' && c != '\n' && c != '\r') {
+                if (c == ' ') {
+                    int next = fgetc(fp);
+                    if (next == ' ' || next == '\t') {
+                        ungetc(next, fp);
+                        break;
+                    }
+                    if (next != EOF) {
+                        ungetc(next, fp);
+                    }
+                }
+                if (len + 1 < sizeof(buf)) {
+                    buf[len++] = (char)c;
+                }
+            }
+            if (c != ',' && c != EOF && c != '\n' && c != '\r') {
+                int next;
+                while ((next = fgetc(fp)) != EOF && (next == ' ' || next == '\t')) {}
+                if (next != ',' && next != EOF) {
+                    ungetc(next, fp);
+                }
+            }
+            // Trim trailing spaces
+            while (len > 0 && (buf[len - 1] == ' ' || buf[len - 1] == '\t')) {
+                len--;
+            }
+        }
+        buf[len] = '\0';
+        symtab_set_str(&rt->symtab, var_name, buf, len);
+        return true;
+    } else {
+        // Numeric item
+        char num_buf[128];
+        size_t len = 0;
+        num_buf[len++] = (char)c;
+        while ((c = fgetc(fp)) != EOF && c != ',' && c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+            if (len + 1 < sizeof(num_buf)) {
+                num_buf[len++] = (char)c;
+            }
+        }
+        num_buf[len] = '\0';
+        if (c != ',' && c != EOF) {
+            int next;
+            while ((next = fgetc(fp)) != EOF && (next == ' ' || next == '\t')) {}
+            if (next != ',' && next != EOF) {
+                ungetc(next, fp);
+            }
+        }
+        char *endptr = NULL;
+        double val = strtod(num_buf, &endptr);
+        if (endptr == num_buf) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        symtab_set_num(&rt->symtab, var_name, val);
+        return true;
+    }
+}
+
 static bool parse_input(Lexer *l, Runtime *rt) {
     lexer_next(l); // consume INPUT
+
+    if (l->current.type == TOKEN_HASH) {
+        lexer_next(l); // consume '#'
+        Value ch_val = expr_eval(l, &rt->symtab, &rt->last_error);
+        if (rt->last_error.code != ERR_OK) return false;
+        if (!value_is_num(&ch_val)) {
+            value_free(&ch_val);
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        double d_ch = ch_val.as.num;
+        value_free(&ch_val);
+        if (d_ch < 0 || d_ch >= MAX_CHANNELS || floor(d_ch) != d_ch) {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+            return false;
+        }
+        int channel_no = (int)d_ch;
+        if (channel_no < 0 || channel_no >= MAX_CHANNELS || !rt->channels[channel_no].is_open) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        if (rt->channels[channel_no].mode == CHANNEL_MODE_WRITE) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        FILE *in_fp = rt->channels[channel_no].fp ? rt->channels[channel_no].fp : (channel_no == 0 || channel_no == 1 ? (rt->in ? rt->in : stdin) : NULL);
+        if (!in_fp) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+
+        if (l->current.type != TOKEN_COMMA) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        lexer_next(l); // consume comma
+
+        while (true) {
+            if (l->current.type != TOKEN_IDENT) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            char *var_name = strdup(l->current.str_val);
+            lexer_next(l);
+
+            size_t nlen = strlen(var_name);
+            bool is_str = (nlen > 0 && var_name[nlen - 1] == '$');
+
+            if (!channel_read_item(in_fp, is_str, var_name, rt)) {
+                free(var_name);
+                return false;
+            }
+            free(var_name);
+
+            if (l->current.type == TOKEN_COMMA) {
+                lexer_next(l);
+            } else {
+                break;
+            }
+        }
+        return true;
+    }
 
     bool had_prompt = false;
     bool modified_temp_attrs = false;
@@ -1463,10 +1672,10 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             return ok;
         }
 
-        case TOKEN_DELETE: {
+        case TOKEN_ERASE: {
             lexer_next(l);
             if (l->current.type == TOKEN_TO) {
-                // DELETE TO [to]
+                // ERASE TO [to]
                 uint16_t from = MIN_LINE_NO;
                 uint16_t to = MAX_LINE_NO;
                 lexer_next(l);
@@ -1505,8 +1714,8 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             if (rt->last_error.code != ERR_OK) return false;
 
             if (value_is_str(&first_val)) {
-                // Filesystem file deletion
-                bool ok = runtime_delete_file(rt, first_val.as.str.chars);
+                // Filesystem file erasure
+                bool ok = runtime_erase_file(rt, first_val.as.str.chars);
                 value_free(&first_val);
                 return ok;
             } else if (value_is_num(&first_val)) {
@@ -1555,6 +1764,251 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
                 rt->last_error.code = ERR_NONSENSE;
                 return false;
             }
+        }
+
+        case TOKEN_OPEN: {
+            lexer_next(l);
+            if (l->current.type != TOKEN_HASH) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+            Value ch_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_num(&ch_val)) {
+                value_free(&ch_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            double d_ch = ch_val.as.num;
+            value_free(&ch_val);
+            if (d_ch < MIN_USER_CHANNEL || d_ch > MAX_USER_CHANNEL || floor(d_ch) != d_ch) {
+                rt->last_error.code = ERR_INTEGER_RANGE;
+                return false;
+            }
+            int channel_no = (int)d_ch;
+
+            if (l->current.type != TOKEN_COMMA) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+
+            Value file_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_str(&file_val)) {
+                value_free(&file_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+
+            bool ok = runtime_channel_open(rt, channel_no, file_val.as.str.chars);
+            value_free(&file_val);
+            return ok;
+        }
+
+        case TOKEN_CLOSE: {
+            lexer_next(l);
+            while (true) {
+                if (l->current.type != TOKEN_HASH) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+                Value ch_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&ch_val)) {
+                    value_free(&ch_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_ch = ch_val.as.num;
+                value_free(&ch_val);
+                if (d_ch < 0 || d_ch > MAX_USER_CHANNEL || floor(d_ch) != d_ch) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                int channel_no = (int)d_ch;
+                if (!runtime_channel_close(rt, channel_no)) {
+                    return false;
+                }
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                } else {
+                    break;
+                }
+            }
+            return true;
+        }
+
+        case TOKEN_MOVE: {
+            lexer_next(l);
+            if (l->current.type == TOKEN_HASH) {
+                lexer_next(l);
+                Value src_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&src_val)) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_src = src_val.as.num;
+                value_free(&src_val);
+                if (d_src < 0 || d_src >= MAX_CHANNELS || floor(d_src) != d_src) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                int src_ch = (int)d_src;
+
+                if (l->current.type != TOKEN_TO) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+
+                if (l->current.type != TOKEN_HASH) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+                Value dest_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&dest_val)) {
+                    value_free(&dest_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_dest = dest_val.as.num;
+                value_free(&dest_val);
+                if (d_dest < 0 || d_dest >= MAX_CHANNELS || floor(d_dest) != d_dest) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                int dest_ch = (int)d_dest;
+
+                return runtime_channel_move(rt, src_ch, dest_ch);
+            } else {
+                Value src_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_str(&src_val)) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                if (l->current.type != TOKEN_TO) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+                Value dest_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) {
+                    value_free(&src_val);
+                    return false;
+                }
+                if (!value_is_str(&dest_val)) {
+                    value_free(&src_val);
+                    value_free(&dest_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                bool ok = runtime_move_file(rt, src_val.as.str.chars, dest_val.as.str.chars);
+                value_free(&src_val);
+                value_free(&dest_val);
+                return ok;
+            }
+        }
+
+        case TOKEN_COPY: {
+            lexer_next(l);
+            if (l->current.type == TOKEN_HASH) {
+                lexer_next(l);
+                Value src_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&src_val)) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_src = src_val.as.num;
+                value_free(&src_val);
+                if (d_src < 0 || d_src >= MAX_CHANNELS || floor(d_src) != d_src) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                int src_ch = (int)d_src;
+
+                if (l->current.type != TOKEN_TO) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+
+                if (l->current.type != TOKEN_HASH) {
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+                Value dest_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_num(&dest_val)) {
+                    value_free(&dest_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                double d_dest = dest_val.as.num;
+                value_free(&dest_val);
+                if (d_dest < 0 || d_dest >= MAX_CHANNELS || floor(d_dest) != d_dest) {
+                    rt->last_error.code = ERR_INTEGER_RANGE;
+                    return false;
+                }
+                int dest_ch = (int)d_dest;
+
+                return runtime_channel_move(rt, src_ch, dest_ch);
+            } else {
+                Value src_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) return false;
+                if (!value_is_str(&src_val)) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                if (l->current.type != TOKEN_TO) {
+                    value_free(&src_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l);
+                Value dest_val = expr_eval(l, &rt->symtab, &rt->last_error);
+                if (rt->last_error.code != ERR_OK) {
+                    value_free(&src_val);
+                    return false;
+                }
+                if (!value_is_str(&dest_val)) {
+                    value_free(&src_val);
+                    value_free(&dest_val);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                bool ok = runtime_copy_file(rt, src_val.as.str.chars, dest_val.as.str.chars);
+                value_free(&src_val);
+                value_free(&dest_val);
+                return ok;
+            }
+        }
+
+        case TOKEN_FORMAT: {
+            lexer_next(l);
+            Value dir_val = expr_eval(l, &rt->symtab, &rt->last_error);
+            if (rt->last_error.code != ERR_OK) return false;
+            if (!value_is_str(&dir_val)) {
+                value_free(&dir_val);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            bool ok = runtime_format_dir(rt, dir_val.as.str.chars);
+            value_free(&dir_val);
+            return ok;
         }
 
         case TOKEN_EDIT: {

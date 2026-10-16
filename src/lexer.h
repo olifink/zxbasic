@@ -15,6 +15,7 @@ typedef enum {
     TOKEN_COMMA,
     TOKEN_SEMICOLON,
     TOKEN_APOSTROPHE,
+    TOKEN_HASH,
     
     // Operators
     TOKEN_PLUS,
@@ -77,8 +78,13 @@ typedef enum {
     TOKEN_AT,
     TOKEN_MERGE,
     TOKEN_CAT,
-    TOKEN_DELETE,
+    TOKEN_ERASE,
     TOKEN_LINE,
+    TOKEN_OPEN,
+    TOKEN_CLOSE,
+    TOKEN_MOVE,
+    TOKEN_COPY,
+    TOKEN_FORMAT,
 
     // Built-in functions
     TOKEN_ABS,

@@ -26,8 +26,8 @@ In ZXBasic, program storage and persistence are managed across the `Program` and
 | `RUN [<file_expr>] [<line_expr>]` | Execution / Disk | Runs current program or loads `<file_expr>` and executes it from the specified line (or start). |
 | `SAVE <file_expr> [LINE [<line_expr>]]` | Program / Disk | Saves program to disk. If optional `LINE` is specified, appends an auto-run directive (`RUN [n]`) to the end of the file. |
 | `CAT [<path_expr>]` | Filesystem | Catalogs and displays directory entries line-by-line relative to the working/program directory. |
-| `DELETE <file_expr>` | Filesystem | Removes the specified file from the host filesystem. |
-| `DELETE [<from>] TO [<to>]` | Program Store | Deletes a range of stored program lines between `<from>` and `<to>` in memory. |
+| `ERASE <file_expr>` | Filesystem | Removes the specified file from the host filesystem. |
+| `ERASE [<from>] TO [<to>]` | Program Store | Deletes a range of stored program lines between `<from>` and `<to>` in memory. |
 | `LIST [[<from>] TO [<to>] \| <start>]` | Program Store | Lists stored program lines across the specified range (or whole program). |
 
 ---
@@ -147,20 +147,20 @@ Directory of ./
 
 ---
 
-## 6. Deletion Primitives: `DELETE`
+## 6. Deletion Primitives: `ERASE`
 
-The `DELETE` keyword serves a dual role in Sinclair-derived systems: filesystem file deletion and in-memory program line deletion.
+The `ERASE` keyword serves a dual role in Sinclair-derived systems: filesystem file deletion and in-memory program line deletion.
 
 ### 6.1 Disambiguation Rule
-The parser and syntax normalizer inspect the token immediately following `DELETE`:
+The parser and syntax normalizer inspect the token immediately following `ERASE`:
 * **File Deletion:** If the next token evaluates to a string expression (`TOKEN_STRING`, string variable identifier `A$`, or string expression), dispatch to **Filesystem Deletion** (`6.2`).
 * **Program Line Deletion:** If the next token is `TOKEN_TO` or evaluates to a numeric expression, dispatch to **Program Line Deletion** (`6.3`).
 * Any other token combination raises `C Nonsense in BASIC`.
 
 ---
 
-### 6.2 Filesystem Deletion: `DELETE "file"`
-* **Syntax:** `DELETE <file_expr>`
+### 6.2 Filesystem Deletion: `ERASE "file"`
+* **Syntax:** `ERASE <file_expr>`
 * **Semantics:** Removes the file designated by `<file_expr>` from disk via the POSIX `unlink(2)` system call.
 * **Scope:** Valid both in Immediate Mode and inside stored program lines.
 * **Error Handling:**
@@ -168,14 +168,14 @@ The parser and syntax normalizer inspect the token immediately following `DELETE
 
 ---
 
-### 6.3 Program Line Range Deletion: `DELETE [from] TO [to]`
+### 6.3 Program Line Range Deletion: `ERASE [from] TO [to]`
 * **Syntax Forms:**
-  1. `DELETE <from> TO <to>` — Deletes all lines whose numbers satisfy $from \le \text{line\_no} \le to$.
-  2. `DELETE TO <to>` — Omitted `from`: deletes all lines from the first stored line up to $to$ ($\text{line\_no} \le to$).
-  3. `DELETE <from> TO` — Omitted `to`: deletes all lines from $from$ up to the last stored line ($\text{line\_no} \ge from$).
-  4. `DELETE TO` — Both omitted: deletes all stored program lines from memory (equivalent to clearing the program store).
+  1. `ERASE <from> TO <to>` — Deletes all lines whose numbers satisfy $from \le \text{line\_no} \le to$.
+  2. `ERASE TO <to>` — Omitted `from`: deletes all lines from the first stored line up to $to$ ($\text{line\_no} \le to$).
+  3. `ERASE <from> TO` — Omitted `to`: deletes all lines from $from$ up to the last stored line ($\text{line\_no} \ge from$).
+  4. `ERASE TO` — Both omitted: deletes all stored program lines from memory (equivalent to clearing the program store).
 * **Optional Single-Line Convenience:**
-  * `DELETE <line>` (without `TO` and not a string) can be supported as shorthand for `DELETE <line> TO <line>`.
+  * `ERASE <line>` (without `TO` and not a string) can be supported as shorthand for `ERASE <line> TO <line>`.
 * **Execution Environment:**
   * **Immediate Mode Only:** Like `EDIT`, `AUTO`, and `RENUM`, altering the program structure wholesale during active program execution is prohibited. If executed inside a running program (`rt->is_running == true`), raises report `C Nonsense in BASIC`.
 * **Range Validation:**
@@ -204,7 +204,7 @@ The parser and syntax normalizer inspect the token immediately following `DELETE
 
 ## 7. Program Listing: `LIST [<from>] [TO [<to>]]`
 
-Like `DELETE`, the `LIST` statement supports program line ranges using `TO`, matching Sinclair BASIC conventions.
+Like `ERASE`, the `LIST` statement supports program line ranges using `TO`, matching Sinclair BASIC conventions.
 
 ### 7.1 Syntax Variations
 * `LIST` — Lists all program lines in memory (lines `1 .. 9999`).
@@ -231,15 +231,15 @@ Like `DELETE`, the `LIST` statement supports program line ranges using `TO`, mat
 ### 8.1 New Keywords & Tokens
 * `TOKEN_MERGE` — Keyword `"MERGE"`
 * `TOKEN_CAT` — Keyword `"CAT"`
-* `TOKEN_DELETE` — Keyword `"DELETE"`
+* `TOKEN_ERASE` — Keyword `"ERASE"`
 * `TOKEN_LINE` — Keyword `"LINE"`
 
 *(Existing tokens `TOKEN_LIST`, `TOKEN_RUN`, `TOKEN_SAVE`, `TOKEN_LOAD`, and `TOKEN_TO` are reused.)*
 
 ### 8.2 Keyword Auto-Capitalization (`src/normalize.c`)
-Add `"MERGE"`, `"CAT"`, `"DELETE"`, `"LINE"` to `is_zx_keyword()`.
-* Input: `10 merge "lib.bas": cat "data": delete 10 to 50`
-* Stored: `10 MERGE "lib.bas": CAT "data": DELETE 10 TO 50`
+Add `"MERGE"`, `"CAT"`, `"ERASE"`, `"LINE"` to `is_zx_keyword()`.
+* Input: `10 merge "lib.bas": cat "data": erase 10 to 50`
+* Stored: `10 MERGE "lib.bas": CAT "data": ERASE 10 TO 50`
 * Input: `list 20 to 100`
 * Normalized: `LIST 20 TO 100`
 * Input: `save "backup.bas" line 20`
@@ -249,8 +249,8 @@ Add `"MERGE"`, `"CAT"`, `"DELETE"`, `"LINE"` to `is_zx_keyword()`.
 * `LIST [[<expr>] TO [<expr>] | <expr>]`: valid line numbers with optional `TO`.
 * `MERGE <expr>`: `<expr>` must be valid syntax.
 * `CAT [<expr>]`: optional `<expr>` must be valid syntax.
-* `DELETE <expr>`: valid file string expression.
-* `DELETE [from] TO [to]`: valid line numbers with `TO`.
+* `ERASE <expr>`: valid file string expression.
+* `ERASE [from] TO [to]`: valid line numbers with `TO`.
 * `SAVE <expr> [LINE [expr]]`: valid syntax for path and optional line target.
 * `RUN [<expr>] [ [,] <expr>]`: valid syntax for optional file string and optional line number.
 
@@ -282,15 +282,15 @@ bool runtime_save_ext(Runtime *rt, const char *path, bool has_line, uint16_t lin
 bool runtime_cat(Runtime *rt, const char *subpath);
 
 // Unlinks specified file from disk
-bool runtime_delete_file(Runtime *rt, const char *path);
+bool runtime_erase_file(Runtime *rt, const char *path);
 ```
 
 #### `src/parser.c`
 * Dispatch `TOKEN_LIST`: parse optional range `[from] [TO [to]]` and call `program_list_range`.
 * Dispatch `TOKEN_MERGE`: parse string expression $\rightarrow$ `runtime_merge`.
 * Dispatch `TOKEN_CAT`: parse optional string expression $\rightarrow$ `runtime_cat`.
-* Dispatch `TOKEN_DELETE`:
-  * Lookahead: if string expression $\rightarrow$ `runtime_delete_file`.
+* Dispatch `TOKEN_ERASE`:
+  * Lookahead: if string expression $\rightarrow$ `runtime_erase_file`.
   * If `TOKEN_TO` or numeric expression $\rightarrow$ parse `[from] TO [to]` range and call `program_delete_range`.
 * Update `TOKEN_RUN`:
   * If next token is string: parse filename, optional comma/space, optional line number. Call `runtime_load` then run.
@@ -322,14 +322,14 @@ bool runtime_delete_file(Runtime *rt, const char *path);
    * Call `CAT` on current workspace; verify expected files appear line-by-line.
    * Call `CAT "tests"`; verify subdirectory files appear.
    * Verify error handling on non-existent directory.
-5. **`DELETE "file"`:**
-   * Create temporary file on disk. Call `DELETE "temp.bas"`. Verify file is unlinked.
-   * Call `DELETE "nonexistent.bas"`; verify report `C Nonsense in BASIC`.
-6. **`DELETE [from] TO [to]` Program Lines:**
+5. **`ERASE "file"`:**
+   * Create temporary file on disk. Call `ERASE "temp.bas"`. Verify file is unlinked.
+   * Call `ERASE "nonexistent.bas"`; verify report `C Nonsense in BASIC`.
+6. **`ERASE [from] TO [to]` Program Lines:**
    * Populate program with lines `10, 20, 30, 40, 50`.
-   * Test `DELETE 20 TO 40` $\rightarrow$ lines `10, 50` remain.
-   * Test `DELETE TO 20` $\rightarrow$ line `50` remains.
-   * Test `DELETE 50 TO` $\rightarrow$ no lines remain.
+   * Test `ERASE 20 TO 40` $\rightarrow$ lines `10, 50` remain.
+   * Test `ERASE TO 20` $\rightarrow$ line `50` remains.
+   * Test `ERASE 50 TO` $\rightarrow$ no lines remain.
    * Verify attempting inside a running program raises `C Nonsense in BASIC`.
 7. **`LIST [<from>] [TO [<to>]]` Program Ranges:**
    * Populate program with lines `10, 20, 30, 40, 50`.

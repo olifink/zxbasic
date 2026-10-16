@@ -34,6 +34,24 @@ typedef struct {
     size_t char_offset;
 } ForFrame;
 
+#define MAX_CHANNELS 16
+#define MIN_USER_CHANNEL 4
+#define MAX_USER_CHANNEL 15
+
+typedef enum {
+    CHANNEL_MODE_NONE = 0,
+    CHANNEL_MODE_READ,      // Opened for reading ("r")
+    CHANNEL_MODE_WRITE,     // Opened for writing ("w")
+    CHANNEL_MODE_SYSTEM     // Standard system stream
+} ChannelMode;
+
+typedef struct {
+    FILE *fp;
+    ChannelMode mode;
+    char *path;
+    bool is_open;
+} Channel;
+
 typedef struct Runtime {
     Program program;
     SymTab symtab;
@@ -92,6 +110,7 @@ typedef struct Runtime {
     bool auto_ran;
     FILE *out;
     FILE *in;
+    Channel channels[MAX_CHANNELS];
 } Runtime;
 
 void runtime_init(Runtime *rt);
@@ -126,6 +145,18 @@ bool runtime_save_ext(Runtime *rt, const char *path, bool has_line, uint16_t lin
 bool runtime_load(Runtime *rt, const char *path);
 bool runtime_merge(Runtime *rt, const char *path);
 bool runtime_cat(Runtime *rt, const char *subpath);
+bool runtime_erase_file(Runtime *rt, const char *path);
 bool runtime_delete_file(Runtime *rt, const char *path);
+bool runtime_erase_recursive(Runtime *rt, const char *path);
+
+// Channels & Streams
+void runtime_channels_init(Runtime *rt);
+void runtime_channels_close_all(Runtime *rt);
+bool runtime_channel_open(Runtime *rt, int channel_no, const char *path);
+bool runtime_channel_close(Runtime *rt, int channel_no);
+bool runtime_channel_move(Runtime *rt, int src_ch, int dest_ch);
+bool runtime_format_dir(Runtime *rt, const char *path);
+bool runtime_move_file(Runtime *rt, const char *src_path, const char *dest_path);
+bool runtime_copy_file(Runtime *rt, const char *src_path, const char *dest_path);
 
 #endif // ZXBASIC_RUNTIME_H

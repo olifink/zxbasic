@@ -19,7 +19,9 @@ all: $(TARGET)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+HDRS = $(wildcard $(SRC_DIR)/*.h)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(HDRS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS)
@@ -33,6 +35,7 @@ TEST_V2_BIN = $(BUILD_DIR)/test_v2
 TEST_COLORS_BIN = $(BUILD_DIR)/test_colors
 TEST_DEBUG_BIN = $(BUILD_DIR)/test_debug
 TEST_FILES_BIN = $(BUILD_DIR)/test_files
+TEST_CHANNELS_BIN = $(BUILD_DIR)/test_channels
 
 CORE_OBJS = $(BUILD_DIR)/program.o $(BUILD_DIR)/error.o $(BUILD_DIR)/value.o $(BUILD_DIR)/symtab.o $(BUILD_DIR)/sysvars.o $(BUILD_DIR)/console.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/expr.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/runtime.o $(BUILD_DIR)/normalize.o $(BUILD_DIR)/linenoise.o
 
@@ -57,7 +60,10 @@ $(TEST_DEBUG_BIN): $(TEST_DIR)/test_debug.c $(CORE_OBJS) | $(BUILD_DIR)
 $(TEST_FILES_BIN): $(TEST_DIR)/test_files.c $(CORE_OBJS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TEST_COLORS_BIN) $(TEST_DEBUG_BIN) $(TEST_FILES_BIN)
+$(TEST_CHANNELS_BIN): $(TEST_DIR)/test_channels.c $(CORE_OBJS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TEST_COLORS_BIN) $(TEST_DEBUG_BIN) $(TEST_FILES_BIN) $(TEST_CHANNELS_BIN)
 	@echo "Running test_store..."
 	./$(TEST_STORE_BIN)
 	@echo "Running test_expr..."
@@ -72,6 +78,8 @@ test: $(TEST_STORE_BIN) $(TEST_EXPR_BIN) $(TEST_RUNTIME_BIN) $(TEST_V2_BIN) $(TE
 	./$(TEST_DEBUG_BIN)
 	@echo "Running test_files..."
 	./$(TEST_FILES_BIN)
+	@echo "Running test_channels..."
+	./$(TEST_CHANNELS_BIN)
 	@echo "All tests passed!"
 
 release:

@@ -268,7 +268,7 @@ The interpreter maintains a table of system variables accessible to runtime rout
 
 #### `CLEAR`
 * **Syntax:** `CLEAR`
-* **Semantics:** Clears all variables and arrays in the symbol table, clears subroutine call and loop stacks, and clears all registered breakpoints without altering lines in the Program Store.
+* **Semantics:** Clears all variables and arrays in the symbol table, clears subroutine call and loop stacks, closes all open user channels, and clears all registered breakpoints without altering lines in the Program Store.
 
 ---
 
@@ -387,13 +387,54 @@ The interpreter maintains a table of system variables accessible to runtime rout
   * Skips hidden files (names starting with `.`).
   * Sorts entries alphabetically, distinguishing subdirectories (`[DIR]`) and displaying file sizes in bytes.
 
-#### `DELETE <file_expr>`
-* **Syntax:** `DELETE <file_expr>`
-* **Semantics:** Deletes the specified file from disk via host filesystem unlinking. Valid in Immediate Mode and inside stored program lines. Failure to find file or permission error raises report `C Nonsense in BASIC`.
+#### `ERASE <file_expr>`
+* **Syntax:** `ERASE <file_expr>`
+* **Semantics:** Erases the specified file from disk via host filesystem unlinking. If `<file_expr>` points to a directory, it recursively removes the directory and all of its contents (`rm -rf` semantics). Valid in Immediate Mode and inside stored program lines. Failure to find file or permission error raises report `C Nonsense in BASIC`.
+
+#### `FORMAT <dir_expr>`
+* **Syntax:** `FORMAT <dir_expr>`
+* **Semantics:** Changes the current working directory to `<dir_expr>`, creating intermediate parent directories (`mkdir -p` with permissions `0755`) if they do not already exist.
 
 ---
 
-### 7.7 Program Store Manipulation
+### 7.7 Channels & Data File Streams
+
+ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted to POSIX filesystems. Streams `#0 .. #3` are permanently reserved for system input/output (`#0`/`#1`: input, `#2`: console output, `#3`: printer/stderr). User file streams are allocated across channels `#4 .. #15`.
+
+#### `OPEN #n, <file_expr>`
+* **Syntax:** `OPEN #<channel_expr>, <file_expr>`
+* **Semantics:** Associates channel $n$ (`4 .. 15`) with a POSIX file:
+  * **File exists:** Opens file in **Read Mode** (`"r"`).
+  * **File does not exist:** Creates file and opens in **Write Mode** (`"w"`).
+  * Re-opening an active channel automatically flushes and closes its previous file.
+
+#### `CLOSE #n [, #m ...]`
+* **Syntax:** `CLOSE #<channel_expr> [, #<channel_expr> ...]`
+* **Semantics:** Flushes and closes one or more active user channels. Closing an already closed user channel is a harmless no-op. Attempting to close system streams `#0 .. #3` raises `C Nonsense in BASIC`.
+
+#### `PRINT #n [, ...]`
+* **Syntax:** `PRINT #<channel_expr> [, <print_list>]`
+* **Semantics:** Emits formatted output to channel $n$. Channel $n$ must be open for writing (or console output stream `#2`). Delimiters `;` (compact) and `,` (tab stops) operate as expected.
+
+#### `INPUT #n, <var> [, <var> ...]`
+* **Syntax:** `INPUT #<channel_expr>, <var> [, <var> ...]`
+* **Semantics:** Ingests structured comma-delimited, tab-delimited, or line-delimited data from channel $n$ into variables. Channel $n$ must be open for reading (or input stream `#0`/`#1`). Reaching end-of-file raises `8 End of DATA`.
+
+#### `MOVE #n TO #m` / `MOVE <fromfile> TO <tofile>`
+* **Syntax:** `MOVE #<src_channel> TO #<dest_channel>` or `MOVE <fromfile_expr> TO <tofile_expr>`
+* **Semantics:**
+  * **Channel Copy (`MOVE #n TO #m`):** Performs byte-level block streaming from readable channel $n$ to writable channel $m$ until EOF on $n$. **Both channels remain open** after transfer.
+  * **File Move/Rename (`MOVE <fromfile> TO <tofile>`):** Renames or moves non-open files on disk by path using POSIX `rename(2)`. If destination is an existing directory, moves the file into that directory. Neither source nor destination may be open in a user channel. Fails with `C Nonsense in BASIC` if source does not exist, an operand is currently open, or filesystem permissions prohibit renaming.
+
+#### `COPY <fromfile> TO <tofile>`
+* **Syntax:** `COPY <fromfile_expr> TO <tofile_expr>` (or `COPY #<src_channel> TO #<dest_channel>`)
+* **Semantics:**
+  * **File Copy (`COPY <fromfile> TO <tofile>`):** Duplicates a non-open file by name on disk. If destination is an existing directory, copies the file into that directory using the source file's basename. Preserves source permissions. Neither source nor destination may be currently open in a user channel. Fails with `C Nonsense in BASIC` if source does not exist, source is a directory, an operand is open, or a write error occurs.
+  * **Channel Copy (`COPY #n TO #m`):** Identical to `MOVE #n TO #m`, copying stream data without closing channels.
+
+---
+
+### 7.8 Program Store Manipulation
 
 #### `LIST [[<from>] TO [<to>] | <start>]`
 * **Syntax:** `LIST`, `LIST <start>`, `LIST <from> TO <to>`, `LIST TO <to>`, `LIST <from> TO`, `LIST TO`
@@ -404,15 +445,15 @@ The interpreter maintains a table of system variables accessible to runtime rout
   * `LIST <from> TO <to>`: Lists lines satisfying $from \le \text{line\_no} \le to$.
   * If $from > to$, no lines match and no output is produced.
 
-#### `DELETE [<from>] TO [<to>]`
-* **Syntax:** `DELETE <from> TO <to>`, `DELETE TO <to>`, `DELETE <from> TO`, `DELETE TO`, `DELETE <line>`
+#### `ERASE [<from>] TO [<to>]`
+* **Syntax:** `ERASE <from> TO <to>`, `ERASE TO <to>`, `ERASE <from> TO`, `ERASE TO`, `ERASE <line>`
 * **Semantics:**
-  * Deletes a range of stored program lines from memory:
-    * `DELETE <from> TO <to>`: Removes lines where $from \le \text{line\_no} \le to$.
-    * `DELETE TO <to>`: Removes lines from beginning through $to$.
-    * `DELETE <from> TO`: Removes lines from $from$ through end of program.
-    * `DELETE TO`: Removes all stored lines.
-    * `DELETE <line>`: Single line deletion shorthand.
+  * Erases a range of stored program lines from memory:
+    * `ERASE <from> TO <to>`: Removes lines where $from \le \text{line\_no} \le to$.
+    * `ERASE TO <to>`: Removes lines from beginning through $to$.
+    * `ERASE <from> TO`: Removes lines from $from$ through end of program.
+    * `ERASE TO`: Removes all stored lines.
+    * `ERASE <line>`: Single line deletion shorthand.
   * **Immediate Mode Only:** Modifying program line ranges during program execution is forbidden; if called inside a running program (`is_running = true`), raises report `C Nonsense in BASIC`.
 
 #### `EDIT <line_number>`

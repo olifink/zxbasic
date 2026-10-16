@@ -15,7 +15,8 @@ static bool is_zx_keyword(const char *upper) {
         "LOAD", "EDIT", "AUTO", "EXIT", "RENUM",
         "CONTINUE", "VARS", "BREAK",
         "INK", "PAPER", "BRIGHT", "INVERSE", "AT",
-        "MERGE", "CAT", "DELETE", "LINE",
+        "MERGE", "CAT", "ERASE", "LINE",
+        "OPEN", "CLOSE", "MOVE", "COPY", "FORMAT",
         "AND", "OR", "NOT",
         "ABS", "ACS", "ASN", "ATN", "COS", "EXP", "INT", "LN", "RND",
         "SGN", "SIN", "SQR", "TAN",
@@ -339,6 +340,13 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
 
         case TOKEN_PRINT: {
             lexer_next(l);
+            if (l->current.type == TOKEN_HASH) {
+                lexer_next(l);
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type == TOKEN_COMMA || l->current.type == TOKEN_SEMICOLON) {
+                    lexer_next(l);
+                }
+            }
             while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
                 if (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA || l->current.type == TOKEN_APOSTROPHE) {
                     lexer_next(l);
@@ -371,6 +379,28 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
 
         case TOKEN_INPUT: {
             lexer_next(l);
+            if (l->current.type == TOKEN_HASH) {
+                lexer_next(l);
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type != TOKEN_COMMA) {
+                    *err_col = l->current.col;
+                    return false;
+                }
+                lexer_next(l);
+                while (true) {
+                    if (l->current.type != TOKEN_IDENT) {
+                        *err_col = l->current.col;
+                        return false;
+                    }
+                    lexer_next(l);
+                    if (l->current.type == TOKEN_COMMA) {
+                        lexer_next(l);
+                    } else {
+                        break;
+                    }
+                }
+                return true;
+            }
             while (l->current.type == TOKEN_SEMICOLON || l->current.type == TOKEN_COMMA ||
                    l->current.type == TOKEN_AT || l->current.type == TOKEN_INK ||
                    l->current.type == TOKEN_PAPER || l->current.type == TOKEN_BRIGHT ||
@@ -615,7 +645,7 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
             }
             return true;
 
-        case TOKEN_DELETE:
+        case TOKEN_ERASE:
             lexer_next(l);
             if (l->current.type == TOKEN_TO) {
                 lexer_next(l);
@@ -632,6 +662,72 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
                 }
             }
             return true;
+
+        case TOKEN_OPEN: {
+            lexer_next(l);
+            if (l->current.type != TOKEN_HASH) {
+                *err_col = l->current.col;
+                return false;
+            }
+            lexer_next(l);
+            if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+            if (l->current.type != TOKEN_COMMA) {
+                *err_col = l->current.col;
+                return false;
+            }
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
+        }
+
+        case TOKEN_CLOSE: {
+            lexer_next(l);
+            while (true) {
+                if (l->current.type != TOKEN_HASH) {
+                    *err_col = l->current.col;
+                    return false;
+                }
+                lexer_next(l);
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type == TOKEN_COMMA) {
+                    lexer_next(l);
+                } else {
+                    break;
+                }
+            }
+            return true;
+        }
+
+        case TOKEN_MOVE:
+        case TOKEN_COPY: {
+            lexer_next(l);
+            if (l->current.type == TOKEN_HASH) {
+                lexer_next(l);
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type != TOKEN_TO) {
+                    *err_col = l->current.col;
+                    return false;
+                }
+                lexer_next(l);
+                if (l->current.type != TOKEN_HASH) {
+                    *err_col = l->current.col;
+                    return false;
+                }
+                lexer_next(l);
+                return validate_precedence(l, VPREC_NONE, err_col);
+            } else {
+                if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type != TOKEN_TO) {
+                    *err_col = l->current.col;
+                    return false;
+                }
+                lexer_next(l);
+                return validate_precedence(l, VPREC_NONE, err_col);
+            }
+        }
+
+        case TOKEN_FORMAT:
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
 
         // Immediate-only commands are forbidden in stored program lines
         case TOKEN_EDIT:

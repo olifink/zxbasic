@@ -12,6 +12,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <errno.h>
+
 #include "normalize.h"
 
 volatile sig_atomic_t g_interrupted = 0;
@@ -48,10 +50,12 @@ void runtime_init(Runtime *rt) {
     rt->auto_current_line = 10;
     rt->auto_step = 10;
     rt->edit_prefill_buffer = NULL;
+    runtime_channels_init(rt);
 }
 
 void runtime_clear(Runtime *rt) {
     if (!rt) return;
+    runtime_channels_close_all(rt);
     symtab_clear(&rt->symtab);
     rt->symtab.sysvars = &rt->sysvars;
     rt->is_running = false;
@@ -89,6 +93,7 @@ void runtime_clear(Runtime *rt) {
 
 void runtime_free(Runtime *rt) {
     if (!rt) return;
+    runtime_channels_close_all(rt);
     program_free(&rt->program);
     symtab_free(&rt->symtab);
     sysvar_table_free(&rt->sysvars);
@@ -816,11 +821,369 @@ bool runtime_cat(Runtime *rt, const char *subpath) {
     return true;
 }
 
+static bool remove_recursive_dir(const char *path) {
+    DIR *d = opendir(path);
+    if (!d) return false;
+    struct dirent *entry;
+    bool ok = true;
+    while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        char subpath[1024];
+        snprintf(subpath, sizeof(subpath), "%s/%s", path, entry->d_name);
+        struct stat st;
+        if (lstat(subpath, &st) != 0) {
+            ok = false;
+            break;
+        }
+        if (S_ISDIR(st.st_mode)) {
+            if (!remove_recursive_dir(subpath)) {
+                ok = false;
+                break;
+            }
+        } else {
+            if (unlink(subpath) != 0) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    closedir(d);
+    if (!ok) return false;
+    return rmdir(path) == 0;
+}
+
+bool runtime_erase_recursive(Runtime *rt, const char *path) {
+    if (!rt || !path || path[0] == '\0') {
+        if (rt) rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    struct stat st;
+    if (lstat(path, &st) != 0) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (S_ISDIR(st.st_mode)) {
+        if (!remove_recursive_dir(path)) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        return true;
+    } else {
+        if (unlink(path) != 0) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        return true;
+    }
+}
+
+bool runtime_erase_file(Runtime *rt, const char *path) {
+    return runtime_erase_recursive(rt, path);
+}
+
 bool runtime_delete_file(Runtime *rt, const char *path) {
-    if (!rt || !path) return false;
-    if (unlink(path) != 0) {
+    return runtime_erase_file(rt, path);
+}
+
+void runtime_channels_init(Runtime *rt) {
+    if (!rt) return;
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        rt->channels[i].fp = NULL;
+        rt->channels[i].path = NULL;
+        rt->channels[i].mode = CHANNEL_MODE_NONE;
+        rt->channels[i].is_open = false;
+    }
+    // Stream 0: stdin / input
+    rt->channels[0].fp = rt->in ? rt->in : stdin;
+    rt->channels[0].mode = CHANNEL_MODE_SYSTEM;
+    rt->channels[0].is_open = true;
+
+    // Stream 1: stdin / input
+    rt->channels[1].fp = rt->in ? rt->in : stdin;
+    rt->channels[1].mode = CHANNEL_MODE_SYSTEM;
+    rt->channels[1].is_open = true;
+
+    // Stream 2: stdout / output
+    rt->channels[2].fp = rt->out ? rt->out : stdout;
+    rt->channels[2].mode = CHANNEL_MODE_SYSTEM;
+    rt->channels[2].is_open = true;
+
+    // Stream 3: stderr / printer
+    rt->channels[3].fp = stderr;
+    rt->channels[3].mode = CHANNEL_MODE_SYSTEM;
+    rt->channels[3].is_open = true;
+}
+
+void runtime_channels_close_all(Runtime *rt) {
+    if (!rt) return;
+    for (int i = MIN_USER_CHANNEL; i <= MAX_USER_CHANNEL; i++) {
+        if (rt->channels[i].is_open) {
+            runtime_channel_close(rt, i);
+        }
+    }
+}
+
+bool runtime_channel_open(Runtime *rt, int channel_no, const char *path) {
+    if (!rt || !path || path[0] == '\0') {
+        if (rt) rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (channel_no < MIN_USER_CHANNEL || channel_no > MAX_USER_CHANNEL) {
+        rt->last_error.code = ERR_INTEGER_RANGE;
+        return false;
+    }
+    if (rt->channels[channel_no].is_open) {
+        runtime_channel_close(rt, channel_no);
+    }
+    if (access(path, F_OK) == 0) {
+        // Exists: open for reading
+        struct stat st;
+        if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        FILE *fp = fopen(path, "r");
+        if (!fp) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        rt->channels[channel_no].fp = fp;
+        rt->channels[channel_no].mode = CHANNEL_MODE_READ;
+        rt->channels[channel_no].path = strdup(path);
+        rt->channels[channel_no].is_open = true;
+        return true;
+    } else {
+        // Does not exist: open for writing
+        FILE *fp = fopen(path, "w");
+        if (!fp) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        rt->channels[channel_no].fp = fp;
+        rt->channels[channel_no].mode = CHANNEL_MODE_WRITE;
+        rt->channels[channel_no].path = strdup(path);
+        rt->channels[channel_no].is_open = true;
+        return true;
+    }
+}
+
+bool runtime_channel_close(Runtime *rt, int channel_no) {
+    if (!rt) return false;
+    if (channel_no < MIN_USER_CHANNEL || channel_no > MAX_USER_CHANNEL) {
+        if (channel_no >= 0 && channel_no < MIN_USER_CHANNEL) {
+            rt->last_error.code = ERR_NONSENSE;
+        } else {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+        }
+        return false;
+    }
+    if (rt->channels[channel_no].is_open) {
+        if (rt->channels[channel_no].fp) {
+            fflush(rt->channels[channel_no].fp);
+            fclose(rt->channels[channel_no].fp);
+            rt->channels[channel_no].fp = NULL;
+        }
+        if (rt->channels[channel_no].path) {
+            free(rt->channels[channel_no].path);
+            rt->channels[channel_no].path = NULL;
+        }
+        rt->channels[channel_no].is_open = false;
+        rt->channels[channel_no].mode = CHANNEL_MODE_NONE;
+    }
+    return true;
+}
+
+bool runtime_channel_move(Runtime *rt, int src_ch, int dest_ch) {
+    if (!rt) return false;
+    if (src_ch < 0 || src_ch >= MAX_CHANNELS || dest_ch < 0 || dest_ch >= MAX_CHANNELS) {
+        rt->last_error.code = ERR_INTEGER_RANGE;
+        return false;
+    }
+    Channel *s = &rt->channels[src_ch];
+    Channel *d = &rt->channels[dest_ch];
+    if (!s->is_open || !d->is_open) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (s->mode == CHANNEL_MODE_WRITE || d->mode == CHANNEL_MODE_READ) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    FILE *src_fp = s->fp ? s->fp : (src_ch == 0 || src_ch == 1 ? (rt->in ? rt->in : stdin) : NULL);
+    FILE *dest_fp = d->fp ? d->fp : (dest_ch == 2 ? rt->out : (dest_ch == 3 ? stderr : NULL));
+    if (!src_fp || !dest_fp) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (src_ch == dest_ch) {
+        return true;
+    }
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src_fp)) > 0) {
+        if (fwrite(buf, 1, n, dest_fp) != n) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+    }
+    fflush(dest_fp);
+    // Channels remain open!
+    return true;
+}
+
+static bool make_dirs_p(const char *path) {
+    char tmp[1024];
+    size_t len = strlen(path);
+    if (len >= sizeof(tmp)) return false;
+    strcpy(tmp, path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (access(tmp, F_OK) != 0) {
+                if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+                    return false;
+                }
+            }
+            *p = '/';
+        }
+    }
+    if (access(tmp, F_OK) != 0) {
+        if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool runtime_format_dir(Runtime *rt, const char *path) {
+    if (!rt || !path || path[0] == '\0') {
+        if (rt) rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (access(path, F_OK) != 0) {
+        if (!make_dirs_p(path)) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+    }
+    if (chdir(path) != 0) {
         rt->last_error.code = ERR_NONSENSE;
         return false;
     }
     return true;
 }
+
+static bool is_channel_file_open(const Runtime *rt, const char *path) {
+    if (!rt || !path) return false;
+    for (int i = MIN_USER_CHANNEL; i <= MAX_USER_CHANNEL; i++) {
+        if (rt->channels[i].is_open && rt->channels[i].path) {
+            if (strcmp(rt->channels[i].path, path) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static const char *resolve_dest_path(const char *src_path, const char *dest_path, char *buf, size_t buf_size) {
+    struct stat st_dest;
+    if (stat(dest_path, &st_dest) == 0 && S_ISDIR(st_dest.st_mode)) {
+        struct stat st_src;
+        if (stat(src_path, &st_src) == 0 && !S_ISDIR(st_src.st_mode)) {
+            const char *base = strrchr(src_path, '/');
+            base = base ? base + 1 : src_path;
+            if (snprintf(buf, buf_size, "%s/%s", dest_path, base) < (int)buf_size) {
+                return buf;
+            }
+        }
+    }
+    return dest_path;
+}
+
+bool runtime_move_file(Runtime *rt, const char *src_path, const char *dest_path) {
+    if (!rt || !src_path || !dest_path || src_path[0] == '\0' || dest_path[0] == '\0') {
+        if (rt) rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    char buf[1024];
+    const char *final_dest = resolve_dest_path(src_path, dest_path, buf, sizeof(buf));
+    if (is_channel_file_open(rt, src_path) || is_channel_file_open(rt, final_dest)) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    if (rename(src_path, final_dest) != 0) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    return true;
+}
+
+bool runtime_copy_file(Runtime *rt, const char *src_path, const char *dest_path) {
+    if (!rt || !src_path || !dest_path || src_path[0] == '\0' || dest_path[0] == '\0') {
+        if (rt) rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    struct stat st_src;
+    if (stat(src_path, &st_src) != 0 || S_ISDIR(st_src.st_mode)) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    char buf[1024];
+    const char *final_dest = resolve_dest_path(src_path, dest_path, buf, sizeof(buf));
+
+    if (is_channel_file_open(rt, src_path) || is_channel_file_open(rt, final_dest)) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    struct stat st_dest;
+    if (stat(final_dest, &st_dest) == 0) {
+        if (st_src.st_dev == st_dest.st_dev && st_src.st_ino == st_dest.st_ino) {
+            // Same file, no-op
+            return true;
+        }
+    }
+
+    FILE *src_fp = fopen(src_path, "rb");
+    if (!src_fp) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    FILE *dest_fp = fopen(final_dest, "wb");
+    if (!dest_fp) {
+        fclose(src_fp);
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    char chunk[4096];
+    size_t n;
+    bool write_ok = true;
+    while ((n = fread(chunk, 1, sizeof(chunk), src_fp)) > 0) {
+        if (fwrite(chunk, 1, n, dest_fp) != n) {
+            write_ok = false;
+            break;
+        }
+    }
+    if (ferror(src_fp)) {
+        write_ok = false;
+    }
+    if (fflush(dest_fp) != 0) {
+        write_ok = false;
+    }
+    fclose(src_fp);
+    fclose(dest_fp);
+
+    if (!write_ok) {
+        unlink(final_dest);
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    chmod(final_dest, st_src.st_mode & 0777);
+    return true;
+}
+
+
