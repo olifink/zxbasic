@@ -468,12 +468,12 @@ ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted 
 * **Semantics:**
   * Pretty-prints the entire stored program to standard output with syntax highlighting, structured formatting, and control flow indicators.
   * **Line Numbers:** Formatted right-aligned to 4 digits (`%4u`).
-  * **Jump Targets & Initiators:** Lines targeted by `GOTO`, `GOSUB`, `RUN`, `RESTORE`, or `THEN <number>` are highlighted with a prominent marker (`▶%4u`) in bold magenta (`\033[1;35m`). Jump initiating instructions `GOTO` and `GOSUB` are likewise highlighted with the same matching color and triangle indicator (`\033[1;35m▶GOTO\033[0m`, `\033[1;35m▶GOSUB\033[0m`).
+  * **Jump Targets:** Lines targeted by `GOTO`, `GOSUB`, `RUN`, `RESTORE`, or `THEN <number>` are highlighted with a prominent marker (`▶%4u`) in bold magenta (`\033[1;35m`). On call sites, the target line number following `GOTO`, `GOSUB`, or `THEN` is likewise highlighted with the same matching color and triangle indicator (`\033[1;35m▶<line_no>\033[0m`, e.g. `GOTO ▶60`), while `GOTO`/`GOSUB` keywords retain standard keyword coloring.
   * **Loop Indentation:** Indents nested code blocks inside `FOR` / `NEXT` loops by 2 spaces per nesting level. `NEXT` statements are dedented before printing.
   * **Syntax Highlighting:**
-    * Keywords: Bold yellow (`\033[1;33m`), except `GOTO`/`GOSUB` jump initiators which use bold magenta (`\033[1;35m▶...`)
+    * Keywords: Bold yellow (`\033[1;33m`)
     * String literals: Green (`\033[32m`)
-    * Number literals: Magenta (`\033[35m`)
+    * Number literals: Magenta (`\033[35m`), with jump target line numbers highlighted in bold magenta (`\033[1;35m▶...`)
     * `REM` comments: Dim gray (`\033[90m`)
   * `LLIST` always lists the entire program and does not accept line range arguments (supplying any arguments raises report `C Nonsense in BASIC`). Standard `LIST` remains strictly unchanged.
 

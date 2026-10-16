@@ -108,10 +108,10 @@ LLIST
    * `FOR` increments indentation level for subsequent lines.
    * Single-line loops (containing both `FOR` and `NEXT`) leave the net indentation unchanged.
 5. **ANSI Syntax Coloring & Jump Indicators:**
-   * **Jump Targets & Initiators:** Target lines are prefixed with `▶%4u ` in bold magenta (`\033[1;35m`). Jump initiating statements `GOTO` and `GOSUB` are highlighted with the matching triangle and bold magenta color (`\033[1;35m▶GOTO\033[0m`, `\033[1;35m▶GOSUB\033[0m`).
-   * **Keywords:** Bold Yellow (`\033[1;33m`) for general statements, loops, built-in functions, `DEF`, `FN`.
+   * **Jump Targets & Call Sites:** Target lines are prefixed with `▶%4u ` in bold magenta (`\033[1;35m`). At the call site, the target line number directly following `GOTO`, `GOSUB`, or `THEN` is highlighted with the matching triangle and bold magenta color (`\033[1;35m▶<line_no>\033[0m`, e.g. `GOTO ▶60`).
+   * **Keywords:** Bold Yellow (`\033[1;33m`) for statements (including `GOTO`, `GOSUB`), loops, built-in functions, `DEF`, `FN`.
    * **String Literals:** Bright Green (`\033[32m`), including enclosing quotes.
-   * **Number Literals:** Magenta (`\033[35m`).
+   * **Number Literals:** Magenta (`\033[35m`), with jump target numbers highlighted in bold magenta (`\033[1;35m▶...`).
    * **Comments (`REM`):** Dim Gray (`\033[90m`).
    * **Identifiers & Operators:** Normal White / Reset (`\033[0m`).
    * Terminal attributes are reset at the end of every line (`\033[0m\n`).

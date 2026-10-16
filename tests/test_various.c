@@ -226,7 +226,9 @@ static void test_llist_pretty_printer(void) {
 
     // 3. Line 30 and 40 are inside FOR loop, so must be indented by 2 spaces
     assert(strstr(buf, "  \033[1;33mPRINT") != NULL);
-    assert(strstr(buf, "  \033[1;35m▶GOTO") != NULL);
+    assert(strstr(buf, "  \033[1;33mGOTO") != NULL);
+    // Target line number after GOTO has matching bold magenta color and triangle
+    assert(strstr(buf, "\033[1;35m▶60\033[0m") != NULL);
 
     // 4. ANSI colors must be present
     // Yellow for keywords: \033[1;33m

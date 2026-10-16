@@ -254,6 +254,7 @@ void program_llist(const Program *p, FILE *out) {
         Lexer l;
         lexer_init(&l, src);
         size_t last_cursor = 0;
+        bool after_jump = false;
 
         while (l.current.type != TOKEN_EOF) {
             size_t tok_start = (l.current.col > 0) ? l.current.col - 1 : last_cursor;
@@ -265,29 +266,41 @@ void program_llist(const Program *p, FILE *out) {
 
             switch (l.current.type) {
                 case TOKEN_STRING:
+                    after_jump = false;
                     fprintf(out, "\033[32m\"%s\"\033[0m", l.current.str_val ? l.current.str_val : "");
                     break;
 
                 case TOKEN_NUMBER: {
                     size_t tok_len = l.cursor > tok_start ? l.cursor - tok_start : 0;
-                    fprintf(out, "\033[35m%.*s\033[0m", (int)tok_len, &src[tok_start]);
+                    if (after_jump) {
+                        fprintf(out, "\033[1;35m▶%.*s\033[0m", (int)tok_len, &src[tok_start]);
+                    } else {
+                        fprintf(out, "\033[35m%.*s\033[0m", (int)tok_len, &src[tok_start]);
+                    }
+                    after_jump = false;
                     break;
                 }
 
                 case TOKEN_REM:
+                    after_jump = false;
                     fprintf(out, "\033[90m%s\033[0m", &src[tok_start]);
                     break;
 
                 case TOKEN_IDENT:
+                    after_jump = false;
                     fprintf(out, "%s", l.current.str_val ? l.current.str_val : "");
                     break;
 
                 default:
-                    if (l.current.type == TOKEN_GOTO || l.current.type == TOKEN_GOSUB) {
-                        fprintf(out, "\033[1;35m▶%s\033[0m", token_type_name(l.current.type));
-                    } else if (l.current.type >= TOKEN_LET && l.current.type <= TOKEN_INKEY_STR) {
+                    if (l.current.type >= TOKEN_LET && l.current.type <= TOKEN_INKEY_STR) {
                         fprintf(out, "\033[1;33m%s\033[0m", token_type_name(l.current.type));
+                        if (l.current.type == TOKEN_GOTO || l.current.type == TOKEN_GOSUB || l.current.type == TOKEN_THEN) {
+                            after_jump = true;
+                        } else {
+                            after_jump = false;
+                        }
                     } else {
+                        after_jump = false;
                         size_t tok_len = l.cursor > tok_start ? l.cursor - tok_start : 1;
                         fprintf(out, "%.*s", (int)tok_len, &src[tok_start]);
                     }
