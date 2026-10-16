@@ -7,10 +7,38 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Sinclair 3-bit color palette mapped to standard ANSI 8-color matrix offsets
-// Sinclair: 0=Black, 1=Blue, 2=Red, 3=Magenta, 4=Green, 5=Cyan, 6=Yellow, 7=White
-// ANSI:     0=Black, 1=Red,  2=Green, 3=Yellow, 4=Blue, 5=Magenta, 6=Cyan, 7=White
-static const int sinclair_to_ansi[8] = { 0, 4, 1, 5, 2, 6, 3, 7 };
+#include <stdint.h>
+
+typedef struct {
+    uint8_t r, g, b;
+} SpectrumRGB;
+
+// Authentic Sinclair ZX Spectrum palette (0=Black, 1=Blue, 2=Red, 3=Magenta, 4=Green, 5=Cyan, 6=Yellow, 7=White)
+// Normal DAC level: 215 (0xD7, ~85%), Bright DAC level: 255 (0xFF, 100%)
+static const SpectrumRGB spectrum_palette[2][8] = {
+    // Normal (BRIGHT 0)
+    {
+        {   0,   0,   0 }, // 0: Black
+        {   0,   0, 215 }, // 1: Blue
+        { 215,   0,   0 }, // 2: Red
+        { 215,   0, 215 }, // 3: Magenta
+        {   0, 215,   0 }, // 4: Green
+        {   0, 215, 215 }, // 5: Cyan
+        { 215, 215,   0 }, // 6: Yellow
+        { 215, 215, 215 }  // 7: White
+    },
+    // Bright (BRIGHT 1)
+    {
+        {   0,   0,   0 }, // 0: Black
+        {   0,   0, 255 }, // 1: Blue
+        { 255,   0,   0 }, // 2: Red
+        { 255,   0, 255 }, // 3: Magenta
+        {   0, 255,   0 }, // 4: Green
+        {   0, 255, 255 }, // 5: Cyan
+        { 255, 255,   0 }, // 6: Yellow
+        { 255, 255, 255 }  // 7: White
+    }
+};
 
 void console_init(Runtime *rt) {
     if (!rt) return;
@@ -84,9 +112,9 @@ void console_apply_delta(Runtime *rt) {
                 fprintf(rt->out, "\033[39m");
                 rt->term_attrs.ink = ATTR_DEFAULT;
             } else if (act_ink >= 0 && act_ink <= 7) {
-                int ansi_c = sinclair_to_ansi[act_ink];
-                int code = (act_bright ? 90 : 30) + ansi_c;
-                fprintf(rt->out, "\033[%dm", code);
+                int b = act_bright ? 1 : 0;
+                SpectrumRGB rgb = spectrum_palette[b][act_ink];
+                fprintf(rt->out, "\033[38;2;%u;%u;%um", rgb.r, rgb.g, rgb.b);
                 rt->term_attrs.ink = act_ink;
             }
         }
@@ -99,9 +127,9 @@ void console_apply_delta(Runtime *rt) {
                 fprintf(rt->out, "\033[49m");
                 rt->term_attrs.paper = ATTR_DEFAULT;
             } else if (act_paper >= 0 && act_paper <= 7) {
-                int ansi_c = sinclair_to_ansi[act_paper];
-                int code = (act_bright ? 100 : 40) + ansi_c;
-                fprintf(rt->out, "\033[%dm", code);
+                int b = act_bright ? 1 : 0;
+                SpectrumRGB rgb = spectrum_palette[b][act_paper];
+                fprintf(rt->out, "\033[48;2;%u;%u;%um", rgb.r, rgb.g, rgb.b);
                 rt->term_attrs.paper = act_paper;
             }
         }
@@ -128,15 +156,17 @@ void console_reapply_permanent_attrs(Runtime *rt) {
     if (p_ink == ATTR_DEFAULT) {
         fprintf(rt->out, "\033[39m");
     } else if (p_ink >= 0 && p_ink <= 7) {
-        int ink_code = (p_bright ? 90 : 30) + sinclair_to_ansi[p_ink & 7];
-        fprintf(rt->out, "\033[%dm", ink_code);
+        int b = p_bright ? 1 : 0;
+        SpectrumRGB rgb = spectrum_palette[b][p_ink & 7];
+        fprintf(rt->out, "\033[38;2;%u;%u;%um", rgb.r, rgb.g, rgb.b);
     }
 
     if (p_paper == ATTR_DEFAULT) {
         fprintf(rt->out, "\033[49m");
     } else if (p_paper >= 0 && p_paper <= 7) {
-        int paper_code = (p_bright ? 100 : 40) + sinclair_to_ansi[p_paper & 7];
-        fprintf(rt->out, "\033[%dm", paper_code);
+        int b = p_bright ? 1 : 0;
+        SpectrumRGB rgb = spectrum_palette[b][p_paper & 7];
+        fprintf(rt->out, "\033[48;2;%u;%u;%um", rgb.r, rgb.g, rgb.b);
     }
 
     rt->term_attrs.ink = (int)p_ink;

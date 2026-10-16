@@ -63,26 +63,26 @@ The runtime initializes and tracks the following system variables:
 
 ## 3. Color & Attribute Mappings
 
-### 3.1 Spectrum Color Indices to ANSI SGR Codes
+### 3.1 Authentic Spectrum Color Indices to 24-bit TrueColor Codes
 
-The Sinclair 3-bit color palette maps directly to the standard ANSI 8-color matrix (indices $0 \dots 7$), with `-1` representing terminal defaults:
+Rather than standard terminal 8-color approximations, colors are rendered using authentic Sinclair ZX Spectrum 24-bit RGB TrueColor escape sequences (`\033[38;2;R;G;Bm` for INK and `\033[48;2;R;G;Bm` for PAPER), capturing the exact DAC output levels of the Spectrum ULA (Normal: DAC level `215` / `0xD7`, Bright: DAC level `255` / `0xFF`):
 
-| Code | Sinclair Color | ANSI Color Name | Normal (`BRIGHT 0`) | High Intensity (`BRIGHT 1`) |
-| --- | --- | --- | --- | --- |
-| `-1` | Terminal Default | Terminal Default | `\033[39m` / `\033[49m` | `\033[39m` / `\033[49m` |
-| `0` | Black | Black | `\033[30m` / `\033[40m` | `\033[90m` / `\033[100m` |
-| `1` | Blue | Blue | `\033[34m` / `\033[44m` | `\033[94m` / `\033[104m` |
-| `2` | Red | Red | `\033[31m` / `\033[41m` | `\033[91m` / `\033[101m` |
-| `3` | Magenta | Magenta | `\033[35m` / `\033[45m` | `\033[95m` / `\033[105m` |
-| `4` | Green | Green | `\033[32m` / `\033[42m` | `\033[92m` / `\033[102m` |
-| `5` | Cyan | Cyan | `\033[36m` / `\033[46m` | `\033[96m` / `\033[106m` |
-| `6` | Yellow | Yellow | `\033[33m` / `\033[43m` | `\033[93m` / `\033[103m` |
-| `7` | White | White | `\033[37m` / `\033[47m` | `\033[97m` / `\033[107m` |
-| `8` | Transparent / Keep | - | No change | No change |
+| Code | Spectrum Color | Normal RGB (`BRIGHT 0`) | Normal Escape (INK / PAPER) | Bright RGB (`BRIGHT 1`) | Bright Escape (INK / PAPER) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| `-1` | Terminal Default | - | `\033[39m` / `\033[49m` | - | `\033[39m` / `\033[49m` |
+| `0` | Black | `(0, 0, 0)` | `\033[38;2;0;0;0m` / `\033[48;2;0;0;0m` | `(0, 0, 0)` | `\033[38;2;0;0;0m` / `\033[48;2;0;0;0m` |
+| `1` | Blue | `(0, 0, 215)` | `\033[38;2;0;0;215m` / `\033[48;2;0;0;215m` | `(0, 0, 255)` | `\033[38;2;0;0;255m` / `\033[48;2;0;0;255m` |
+| `2` | Red | `(215, 0, 0)` | `\033[38;2;215;0;0m` / `\033[48;2;215;0;0m` | `(255, 0, 0)` | `\033[38;2;255;0;0m` / `\033[48;2;255;0;0m` |
+| `3` | Magenta | `(215, 0, 215)` | `\033[38;2;215;0;215m` / `\033[48;2;215;0;215m` | `(255, 0, 255)` | `\033[38;2;255;0;255m` / `\033[48;2;255;0;255m` |
+| `4` | Green | `(0, 215, 0)` | `\033[38;2;0;215;0m` / `\033[48;2;0;215;0m` | `(0, 255, 0)` | `\033[38;2;0;255;0m` / `\033[48;2;0;255;0m` |
+| `5` | Cyan | `(0, 215, 215)` | `\033[38;2;0;215;215m` / `\033[48;2;0;215;215m` | `(0, 255, 255)` | `\033[38;2;0;255;255m` / `\033[48;2;0;255;255m` |
+| `6` | Yellow | `(215, 215, 0)` | `\033[38;2;215;215;0m` / `\033[48;2;215;215;0m` | `(255, 255, 0)` | `\033[38;2;255;255;0m` / `\033[48;2;255;255;0m` |
+| `7` | White | `(215, 215, 215)` | `\033[38;2;215;215;215m` / `\033[48;2;215;215;215m` | `(255, 255, 255)` | `\033[38;2;255;255;255m` / `\033[48;2;255;255;255m` |
+| `8` | Transparent / Keep | - | No change | - | No change |
 
 ### 3.2 ANSI Escape Sequence Dispatch
 
-Whenever active attributes change, the runtime calculates the delta and emits the corresponding ANSI Select Graphic Rendition (SGR) sequence:
+Whenever active attributes change, the runtime calculates the delta and emits the corresponding ANSI / TrueColor escape sequence:
 
 * **Reset Sequence:** `\033[0m`
 * **Default Terminal Colors:**
@@ -95,14 +95,12 @@ Whenever active attributes change, the runtime calculates the delta and emits th
 * **Color Selection Formula:**
   * For Foreground (`INK c`, where $c \in [-1..8]$):
     * If $c == -1$: emit `\033[39m` (terminal default foreground)
-    * If $c \in [0..7]$ and `BRIGHT == 1`: code is $90 + c$
-    * If $c \in [0..7]$ and `BRIGHT == 0`: code is $30 + c$
+    * If $c \in [0..7]$: emit `\033[38;2;<R>;<G>;<B>m` using `spectrum_palette[bright][c]`
     * If $c == 8$: no change
 
   * For Background (`PAPER c`, where $c \in [-1..8]$):
     * If $c == -1$: emit `\033[49m` (terminal default background)
-    * If $c \in [0..7]$ and `BRIGHT == 1`: code is $100 + c$
-    * If $c \in [0..7]$ and `BRIGHT == 0`: code is $40 + c$
+    * If $c \in [0..7]$: emit `\033[48;2;<R>;<G>;<B>m` using `spectrum_palette[bright][c]`
     * If $c == 8$: no change
 
 ---

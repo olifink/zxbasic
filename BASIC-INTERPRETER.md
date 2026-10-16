@@ -199,19 +199,19 @@ Display formatting is mapped to ANSI / VT100 terminal escape sequences while pre
 * ANSI cursor positioning emits: `\033[<row + 1>;<col + 1>H`.
 
 ### 6.2 Color Palette
-Standard Sinclair 8-color indices, augmented by `-1` representing the terminal's native default color:
+Standard Sinclair 8-color indices, rendered via authentic Sinclair ZX Spectrum 24-bit RGB TrueColor escape sequences (`\033[38;2;R;G;Bm` for INK and `\033[48;2;R;G;Bm` for PAPER), augmented by `-1` representing the terminal's native default color:
 
-| Index | Color | ANSI Foreground | ANSI Background |
-| :---: | :--- | :---: | :---: |
-| `-1` | **Terminal Default / Reset** | `\033[39m` | `\033[49m` |
-| `0` | Black | `\033[30m` | `\033[40m` |
-| `1` | Blue | `\033[34m` | `\033[44m` |
-| `2` | Red | `\033[31m` | `\033[41m` |
-| `3` | Magenta | `\033[35m` | `\033[45m` |
-| `4` | Green | `\033[32m` | `\033[42m` |
-| `5` | Cyan | `\033[36m` | `\033[46m` |
-| `6` | Yellow | `\033[33m` | `\033[43m` |
-| `7` | White | `\033[37m` | `\033[47m` |
+| Index | Color | Normal RGB (`BRIGHT 0`) | Bright RGB (`BRIGHT 1`) | Escape Sequences (Normal / Bright) |
+| :---: | :--- | :---: | :---: | :---: |
+| `-1` | **Terminal Default / Reset** | - | - | INK: `\033[39m` / PAPER: `\033[49m` |
+| `0` | Black | `(0, 0, 0)` | `(0, 0, 0)` | `\033[38;2;0;0;0m` / `\033[48;2;0;0;0m` |
+| `1` | Blue | `(0, 0, 215)` | `(0, 0, 255)` | Normal: `..;0;0;215m` / Bright: `..;0;0;255m` |
+| `2` | Red | `(215, 0, 0)` | `(255, 0, 0)` | Normal: `..;215;0;0m` / Bright: `..;255;0;0m` |
+| `3` | Magenta | `(215, 0, 215)` | `(255, 0, 255)` | Normal: `..;215;0;215m` / Bright: `..;255;0;255m` |
+| `4` | Green | `(0, 215, 0)` | `(0, 255, 0)` | Normal: `..;0;215;0m` / Bright: `..;0;255;0m` |
+| `5` | Cyan | `(0, 215, 215)` | `(0, 255, 255)` | Normal: `..;0;215;215m` / Bright: `..;0;255;255m` |
+| `6` | Yellow | `(215, 215, 0)` | `(255, 255, 0)` | Normal: `..;215;215;0m` / Bright: `..;255;255;0m` |
+| `7` | White | `(215, 215, 215)` | `(255, 255, 255)` | Normal: `..;215;215;215m` / Bright: `..;255;255;255m` |
 
 ### 6.3 Attribute Scopes: Permanent vs. Temporary
 1. **Permanent Attributes (`ATTR_P_*`):**

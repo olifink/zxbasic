@@ -96,7 +96,7 @@ static void test_standalone_attributes(void) {
     assert(sysvar_get_int(&rt.sysvars, "ATTR_P_INK", &val) && val == -1);
     assert(sysvar_get_int(&rt.sysvars, "ATTR_P_PAPER", &val) && val == -1);
 
-    // INK 2 (Red -> ANSI fg 31)
+    // INK 2 (Red -> Spectrum normal RGB 215, 0, 0)
     runtime_process_input(&rt, "INK 2", true);
     assert(rt.last_error.code == ERR_OK);
     assert(sysvar_get_int(&rt.sysvars, "ATTR_P_INK", &val) && val == 2);
@@ -105,9 +105,9 @@ static void test_standalone_attributes(void) {
     char buf[512];
     size_t n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
-    assert(strstr(buf, "\033[31m") != NULL);
+    assert(strstr(buf, "\033[38;2;215;0;0m") != NULL);
 
-    // PAPER 4 (Green -> ANSI bg 42)
+    // PAPER 4 (Green -> Spectrum normal RGB 0, 215, 0)
     rewind(out);
     ftruncate(fileno(out), 0);
     runtime_process_input(&rt, "PAPER 4", true);
@@ -117,9 +117,9 @@ static void test_standalone_attributes(void) {
     rewind(out);
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
-    assert(strstr(buf, "\033[42m") != NULL);
+    assert(strstr(buf, "\033[48;2;0;215;0m") != NULL);
 
-    // BRIGHT 1 (High intensity: fg becomes 91, bg becomes 102)
+    // BRIGHT 1 (High intensity: red becomes 255, 0, 0; green becomes 0, 255, 0)
     rewind(out);
     ftruncate(fileno(out), 0);
     runtime_process_input(&rt, "BRIGHT 1", true);
@@ -129,8 +129,8 @@ static void test_standalone_attributes(void) {
     rewind(out);
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
-    assert(strstr(buf, "\033[91m") != NULL);
-    assert(strstr(buf, "\033[102m") != NULL);
+    assert(strstr(buf, "\033[38;2;255;0;0m") != NULL);
+    assert(strstr(buf, "\033[48;2;0;255;0m") != NULL);
 
     // INVERSE 1 (\033[7m)
     rewind(out);
@@ -237,7 +237,7 @@ static void test_inline_temporary_attributes(void) {
     assert(rt.last_error.code == ERR_OK);
 
     // Inline modifiers: PRINT INK 2; "Red"; INK 7; "White"
-    // At conclusion of PRINT, should restore permanent INK 1 (\033[34m)
+    // At conclusion of PRINT, should restore permanent INK 1 (\033[38;2;0;0;215m)
     rewind(out);
     ftruncate(fileno(out), 0);
     runtime_process_input(&rt, "PRINT INK 2; \"Red\"; INK 7; \"White\"", true);
@@ -248,18 +248,18 @@ static void test_inline_temporary_attributes(void) {
     size_t n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
 
-    // Must have INK 2 (\033[31m), Red, INK 7 (\033[37m), White, and restored INK 1 (\033[34m)
-    char *p_red_code = strstr(buf, "\033[31m");
+    // Must have INK 2 (\033[38;2;215;0;0m), Red, INK 7 (\033[38;2;215;215;215m), White, and restored INK 1 (\033[38;2;0;0;215m)
+    char *p_red_code = strstr(buf, "\033[38;2;215;0;0m");
     assert(p_red_code != NULL);
     char *p_red_text = strstr(buf, "Red");
     assert(p_red_text != NULL && p_red_text > p_red_code);
 
-    char *p_white_code = strstr(buf, "\033[37m");
+    char *p_white_code = strstr(buf, "\033[38;2;215;215;215m");
     assert(p_white_code != NULL && p_white_code > p_red_text);
     char *p_white_text = strstr(buf, "White");
     assert(p_white_text != NULL && p_white_text > p_white_code);
 
-    char *p_restore_blue = strstr(p_white_text, "\033[34m");
+    char *p_restore_blue = strstr(p_white_text, "\033[38;2;0;0;215m");
     assert(p_restore_blue != NULL);
 
     // Verify sysvars temporary attributes were reset to -2 (ATTR_INACTIVE)
@@ -276,7 +276,7 @@ static void test_inline_temporary_attributes(void) {
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
 
-    p_red_code = strstr(buf, "\033[31m");
+    p_red_code = strstr(buf, "\033[38;2;215;0;0m");
     assert(p_red_code != NULL);
     p_red_text = strstr(buf, "Red");
     assert(p_red_text != NULL && p_red_text > p_red_code);
@@ -286,7 +286,7 @@ static void test_inline_temporary_attributes(void) {
     char *p_def_text = strstr(buf, "Default");
     assert(p_def_text != NULL && p_def_text > p_def_code);
 
-    p_restore_blue = strstr(p_def_text, "\033[34m");
+    p_restore_blue = strstr(p_def_text, "\033[38;2;0;0;215m");
     assert(p_restore_blue != NULL);
 
     assert(sysvar_get_int(&rt.sysvars, "ATTR_T_INK", &t_ink) && t_ink == -2);
@@ -317,9 +317,9 @@ static void test_cursor_positioning_at(void) {
 
     // AT 10, 5 emits ANSI \033[11;6H
     assert(strstr(buf, "\033[11;6H") != NULL);
-    assert(strstr(buf, "\033[32m") != NULL);
+    assert(strstr(buf, "\033[38;2;0;215;0m") != NULL);
     assert(strstr(buf, "Green Text") != NULL);
-    assert(strstr(buf, "\033[31m") != NULL);
+    assert(strstr(buf, "\033[38;2;215;0;0m") != NULL);
     assert(strstr(buf, "Red Text") != NULL);
 
     // S_POSN coordinates after newline
@@ -366,8 +366,8 @@ static void test_screen_clearing_cls(void) {
 
     // Must emit \033[2J\033[H and re-apply permanent attributes
     assert(strstr(buf, "\033[2J\033[H") != NULL);
-    assert(strstr(buf, "\033[31m") != NULL); // Red fg
-    assert(strstr(buf, "\033[44m") != NULL); // Blue bg
+    assert(strstr(buf, "\033[38;2;215;0;0m") != NULL); // Red fg
+    assert(strstr(buf, "\033[48;2;0;0;215m") != NULL); // Blue bg
 
     int64_t row = -1, col = -1;
     sysvar_get_int(&rt.sysvars, "S_POSN_ROW", &row);
@@ -426,10 +426,10 @@ static void test_input_stream_modifiers(void) {
     // Cursor at line 6, col 3
     assert(strstr(buf, "\033[6;3H") != NULL);
     // Magenta prompt
-    assert(strstr(buf, "\033[35m") != NULL);
+    assert(strstr(buf, "\033[38;2;215;0;215m") != NULL);
     assert(strstr(buf, "Your Name: ") != NULL);
     // Restored white fg at conclusion
-    assert(strstr(buf, "\033[37m") != NULL);
+    assert(strstr(buf, "\033[38;2;215;215;215m") != NULL);
 
     const char *str = NULL;
     size_t len = 0;
