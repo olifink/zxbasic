@@ -72,7 +72,7 @@ const char *token_type_name(TokenType t) {
         case TOKEN_EXIT: return "EXIT";
         case TOKEN_RENUM: return "RENUM";
         case TOKEN_CONTINUE: return "CONTINUE";
-        case TOKEN_VARS: return "VARS";
+        case TOKEN_VERIFY: return "VERIFY";
         case TOKEN_BREAK: return "BREAK";
         case TOKEN_INK: return "INK";
         case TOKEN_PAPER: return "PAPER";
@@ -180,7 +180,7 @@ static TokenType match_keyword(const char *upper) {
     if (strcmp(upper, "EXIT") == 0) return TOKEN_EXIT;
     if (strcmp(upper, "RENUM") == 0) return TOKEN_RENUM;
     if (strcmp(upper, "CONTINUE") == 0) return TOKEN_CONTINUE;
-    if (strcmp(upper, "VARS") == 0) return TOKEN_VARS;
+    if (strcmp(upper, "VERIFY") == 0) return TOKEN_VERIFY;
     if (strcmp(upper, "BREAK") == 0) return TOKEN_BREAK;
     if (strcmp(upper, "INK") == 0) return TOKEN_INK;
     if (strcmp(upper, "PAPER") == 0) return TOKEN_PAPER;

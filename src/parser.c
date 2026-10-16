@@ -1559,13 +1559,13 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
             runtime_clear(rt);
             return true;
 
-        case TOKEN_VARS:
+        case TOKEN_VERIFY:
             lexer_next(l);
             if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
                 rt->last_error.code = ERR_NONSENSE;
                 return false;
             }
-            runtime_vars(rt);
+            runtime_verify(rt);
             return true;
 
         case TOKEN_CONTINUE: {

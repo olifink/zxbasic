@@ -507,8 +507,8 @@ ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted 
 
 ### 7.8 Interactive Debugging & Inspection
 
-#### `VARS`
-* **Syntax:** `VARS`
+#### `VERIFY`
+* **Syntax:** `VERIFY`
 * **Semantics:** Dumps a structured table of all defined scalar variables and arrays from the symbol table to standard output, displaying:
   * Variable Name
   * Type (`NUMBER`, `STRING`, `ARRAY(N)`, `ARRAY(S)`)
@@ -597,7 +597,7 @@ function RUN_PROGRAM(start_line):
   ```text
   9 BREAK into program, <line>:<statement>
   ```
-* All runtime variables, stacks, and data cursors remain intact, allowing inspection via `VARS` and resumption via `CONTINUE`.
+* All runtime variables, stacks, and data cursors remain intact, allowing inspection via `VERIFY` and resumption via `CONTINUE`.
 * In Immediate Mode, Ctrl+C clears the current input line buffer and returns to a fresh REPL prompt.
 
 ---

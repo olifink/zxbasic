@@ -13,7 +13,7 @@ static bool is_zx_keyword(const char *upper) {
         "FOR", "TO", "STEP", "NEXT", "DATA", "READ", "RESTORE", "DIM",
         "STOP", "REM", "RUN", "LIST", "NEW", "CLEAR", "CLS", "SAVE",
         "LOAD", "EDIT", "AUTO", "EXIT", "RENUM",
-        "CONTINUE", "VARS", "BREAK",
+        "CONTINUE", "VERIFY", "BREAK",
         "INK", "PAPER", "BRIGHT", "INVERSE", "AT",
         "MERGE", "CAT", "ERASE", "LINE",
         "OPEN", "CLOSE", "MOVE", "COPY", "FORMAT",
@@ -505,7 +505,7 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
         case TOKEN_STOP:
         case TOKEN_CLS:
         case TOKEN_CLEAR:
-        case TOKEN_VARS:
+        case TOKEN_VERIFY:
             lexer_next(l);
             return true;
 

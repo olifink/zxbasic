@@ -18,15 +18,15 @@ In ZXBasic, program execution is managed by the `Runtime` subsystem (`src/runtim
   * Breakpoint / Stop Target: Halts execution before executing the targeted line, emitting report `9 Breakpoint reached, <line>:1`.
 * **State Preservation:**
   * Halting execution sets `is_running = false` but leaves all variables (`symtab`), system variables (`sysvars`), call frames (`call_stack`), loop frames (`for_stack`), and data pointers intact.
-  * Direct commands in immediate mode (e.g. `PRINT X`, `LET Y = 10`, `VARS`) execute within this suspended runtime environment without resetting program counters or stacks.
+  * Direct commands in immediate mode (e.g. `PRINT X`, `LET Y = 10`, `VERIFY`) execute within this suspended runtime environment without resetting program counters or stacks.
 
 ---
 
-## 2. Variable Inspection: `VARS`
+## 2. Variable Inspection: `VERIFY`
 
 ### 2.1 Syntax & Availability
-* **Syntax:** `VARS`
-* **Availability:** Valid both in interactive Immediate Mode and as a program instruction inside lines (e.g., `100 VARS`).
+* **Syntax:** `VERIFY`
+* **Availability:** Valid both in interactive Immediate Mode and as a program instruction inside lines (e.g., `100 VERIFY`).
 * **Arguments:** Takes no arguments. Trailing characters before a statement delimiter (`:` or newline) raise `C Nonsense in BASIC`.
 
 ### 2.2 Behavior
@@ -140,6 +140,6 @@ typedef struct Runtime {
 ```
 
 ### 6.2 Lexer & Normalizer Updates
-* Tokens: `TOKEN_CONTINUE`, `TOKEN_VARS`, `TOKEN_BREAK`.
-* Keywords added to `is_zx_keyword`: `"CONTINUE"`, `"VARS"`, `"BREAK"`.
-* Syntax validation rules for `CONTINUE [expr]`, `VARS`, and `BREAK [line [, line...]]`.
+* Tokens: `TOKEN_CONTINUE`, `TOKEN_VERIFY`, `TOKEN_BREAK`.
+* Keywords added to `is_zx_keyword`: `"CONTINUE"`, `"VERIFY"`, `"BREAK"`.
+* Syntax validation rules for `CONTINUE [expr]`, `VERIFY`, and `BREAK [line [, line...]]`.

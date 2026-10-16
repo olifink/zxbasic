@@ -69,7 +69,7 @@ typedef enum {
     TOKEN_EXIT,
     TOKEN_RENUM,
     TOKEN_CONTINUE,
-    TOKEN_VARS,
+    TOKEN_VERIFY,
     TOKEN_BREAK,
     TOKEN_INK,
     TOKEN_PAPER,

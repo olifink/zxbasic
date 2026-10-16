@@ -216,7 +216,7 @@ void runtime_clear_breakpoints(Runtime *rt) {
     rt->temp_stop_line = 0;
 }
 
-void runtime_vars(Runtime *rt) {
+void runtime_verify(Runtime *rt) {
     if (!rt || !rt->out) return;
     SymTab *st = &rt->symtab;
     size_t total = st->num_vars_count + st->str_vars_count + st->num_arrays_count + st->str_arrays_count;

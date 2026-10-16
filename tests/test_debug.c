@@ -364,14 +364,14 @@ static void test_inline_break_statement(void) {
     printf("test_inline_break_statement: PASS\n");
 }
 
-static void test_vars_keyword(void) {
+static void test_verify_keyword(void) {
     Runtime rt;
     runtime_init(&rt);
     FILE *out = tmpfile();
     rt.out = out;
 
     // Initially no variables defined
-    runtime_process_input(&rt, "VARS", true);
+    runtime_process_input(&rt, "VERIFY", true);
     rewind(out);
     char buf[1024];
     size_t n = fread(buf, 1, sizeof(buf) - 1, out);
@@ -388,7 +388,7 @@ static void test_vars_keyword(void) {
     rewind(out);
     ftruncate(fileno(out), 0);
 
-    runtime_process_input(&rt, "VARS", true);
+    runtime_process_input(&rt, "VERIFY", true);
     rewind(out);
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
@@ -423,19 +423,19 @@ static void test_vars_keyword(void) {
     rewind(out);
     ftruncate(fileno(out), 0);
 
-    runtime_process_input(&rt, "VARS", true);
+    runtime_process_input(&rt, "VERIFY", true);
     rewind(out);
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
     assert(strstr(buf, "LONGSTR$") != NULL);
     assert(strstr(buf, "...") != NULL);
 
-    // After CLEAR, VARS should report no variables
+    // After CLEAR, VERIFY should report no variables
     runtime_process_input(&rt, "CLEAR", true);
     rewind(out);
     ftruncate(fileno(out), 0);
 
-    runtime_process_input(&rt, "VARS", true);
+    runtime_process_input(&rt, "VERIFY", true);
     rewind(out);
     n = fread(buf, 1, sizeof(buf) - 1, out);
     buf[n] = '\0';
@@ -443,30 +443,30 @@ static void test_vars_keyword(void) {
 
     fclose(out);
     runtime_free(&rt);
-    printf("test_vars_keyword: PASS\n");
+    printf("test_verify_keyword: PASS\n");
 }
 
 static void test_debug_syntax_and_normalization(void) {
     // Keyword auto-capitalization
-    char *res1 = normalize_keywords("continue: vars: break 20, 30");
-    assert(strcmp(res1, "CONTINUE: VARS: BREAK 20, 30") == 0);
+    char *res1 = normalize_keywords("continue: verify: break 20, 30");
+    assert(strcmp(res1, "CONTINUE: VERIFY: BREAK 20, 30") == 0);
     free(res1);
 
-    char *res2 = normalize_keywords("10 continue 50: 20 vars");
-    assert(strcmp(res2, "10 CONTINUE 50: 20 VARS") == 0);
+    char *res2 = normalize_keywords("10 continue 50: 20 verify");
+    assert(strcmp(res2, "10 CONTINUE 50: 20 VERIFY") == 0);
     free(res2);
 
     // Syntax validation
     size_t err_col = 0;
     assert(syntax_validate_line("CONTINUE", &err_col));
     assert(syntax_validate_line("CONTINUE 50", &err_col));
-    assert(syntax_validate_line("VARS", &err_col));
+    assert(syntax_validate_line("VERIFY", &err_col));
     assert(syntax_validate_line("BREAK", &err_col));
     assert(syntax_validate_line("BREAK 20", &err_col));
     assert(syntax_validate_line("BREAK 20, 40, 60", &err_col));
 
     // Standalone illegal syntax
-    assert(!syntax_validate_line("VARS 10", &err_col));
+    assert(!syntax_validate_line("VERIFY 10", &err_col));
 
     printf("test_debug_syntax_and_normalization: PASS\n");
 }
@@ -549,7 +549,7 @@ int main(void) {
     test_continue_in_program_statement();
     test_breakpoints_and_clear();
     test_inline_break_statement();
-    test_vars_keyword();
+    test_verify_keyword();
     test_debug_syntax_and_normalization();
     test_interactive_goto();
     printf("All debug tests passed successfully!\n");

@@ -122,7 +122,7 @@ bool runtime_add_breakpoint(Runtime *rt, uint16_t line_no);
 bool runtime_has_breakpoint(const Runtime *rt, uint16_t line_no);
 void runtime_clear_breakpoints(Runtime *rt);
 bool runtime_continue(Runtime *rt, uint16_t temp_stop_line);
-void runtime_vars(Runtime *rt);
+void runtime_verify(Runtime *rt);
 bool runtime_goto(Runtime *rt, uint16_t target_line);
 
 // Resets runtime state for RUN
