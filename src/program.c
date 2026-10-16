@@ -415,38 +415,92 @@ static char *patch_line_branch_targets(const char *source, uint16_t old_line_no,
     return out;
 }
 
-bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError *err, FILE *warn_out) {
+static int compare_program_lines(const void *a, const void *b) {
+    const ProgramLine *pa = (const ProgramLine *)a;
+    const ProgramLine *pb = (const ProgramLine *)b;
+    if (pa->line_no < pb->line_no) return -1;
+    if (pa->line_no > pb->line_no) return 1;
+    return 0;
+}
+
+bool program_renumber_range(Program *p, uint16_t start_line, uint16_t step, uint16_t from_line, uint16_t to_line, BasicError *err, FILE *warn_out) {
     if (!p || p->count == 0) return true;
 
     if (start_line == 0) start_line = 10;
     if (step == 0) step = 10;
+    if (from_line == 0) from_line = MIN_LINE_NO;
+    if (to_line == 0) to_line = MAX_LINE_NO;
 
     if (start_line < MIN_LINE_NO || start_line > MAX_LINE_NO || step < 1) {
         if (err) err->code = ERR_INTEGER_RANGE;
         return false;
     }
 
-    if (p->count > 1) {
-        uint64_t max_new = (uint64_t)start_line + (uint64_t)(p->count - 1) * (uint64_t)step;
-        if (max_new > MAX_LINE_NO) {
-            if (err) err->code = ERR_INTEGER_RANGE;
-            return false;
+    if (from_line > to_line) return true;
+
+    size_t match_count = 0;
+    for (size_t i = 0; i < p->count; i++) {
+        if (p->lines[i].line_no >= from_line && p->lines[i].line_no <= to_line) {
+            match_count++;
         }
+    }
+    if (match_count == 0) return true;
+
+    uint64_t max_new = (uint64_t)start_line + (uint64_t)(match_count - 1) * (uint64_t)step;
+    if (max_new > MAX_LINE_NO) {
+        if (err) err->code = ERR_INTEGER_RANGE;
+        return false;
+    }
+
+    uint16_t *candidates = malloc(p->count * sizeof(uint16_t));
+    if (!candidates) {
+        if (err) err->code = ERR_OUT_OF_MEMORY;
+        return false;
+    }
+
+    size_t k = 0;
+    for (size_t i = 0; i < p->count; i++) {
+        if (p->lines[i].line_no >= from_line && p->lines[i].line_no <= to_line) {
+            candidates[i] = (uint16_t)(start_line + k * step);
+            k++;
+        } else {
+            candidates[i] = p->lines[i].line_no;
+        }
+    }
+
+    // Check for collisions (duplicate line numbers)
+    bool has_collision = false;
+    for (size_t i = 0; i < p->count; i++) {
+        for (size_t j = i + 1; j < p->count; j++) {
+            if (candidates[i] == candidates[j]) {
+                has_collision = true;
+                break;
+            }
+        }
+        if (has_collision) break;
+    }
+
+    if (has_collision) {
+        free(candidates);
+        if (err) err->code = ERR_INTEGER_RANGE;
+        return false;
     }
 
     LineMap *map = malloc(p->count * sizeof(LineMap));
     if (!map) {
+        free(candidates);
         if (err) err->code = ERR_OUT_OF_MEMORY;
         return false;
     }
 
     for (size_t i = 0; i < p->count; i++) {
         map[i].old_line = p->lines[i].line_no;
-        map[i].new_line = (uint16_t)(start_line + i * step);
+        map[i].new_line = candidates[i];
     }
 
     char **new_sources = malloc(p->count * sizeof(char *));
     if (!new_sources) {
+        free(candidates);
         free(map);
         if (err) err->code = ERR_OUT_OF_MEMORY;
         return false;
@@ -457,12 +511,19 @@ bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError
     }
 
     for (size_t i = 0; i < p->count; i++) {
-        p->lines[i].line_no = map[i].new_line;
+        p->lines[i].line_no = candidates[i];
         free(p->lines[i].source);
         p->lines[i].source = new_sources[i];
     }
 
     free(new_sources);
+    free(candidates);
     free(map);
+
+    qsort(p->lines, p->count, sizeof(ProgramLine), compare_program_lines);
     return true;
+}
+
+bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError *err, FILE *warn_out) {
+    return program_renumber_range(p, start_line, step, MIN_LINE_NO, MAX_LINE_NO, err, warn_out);
 }

@@ -54,6 +54,12 @@ void program_list_range(const Program *p, uint16_t from, uint16_t to, FILE *out)
 // Pretty prints entire program with syntax highlighting, right-aligned line numbers, loop indentation, and jump target indicators.
 void program_llist(const Program *p, FILE *out);
 
+// Renumbers stored lines in the range [from_line, to_line] starting at start_line with step increment,
+// patching branch targets across the entire program.
+// If any line would exceed 9999 or collide with an existing untouched line, aborts without modifying store
+// and sets err->code = ERR_INTEGER_RANGE.
+bool program_renumber_range(Program *p, uint16_t start_line, uint16_t step, uint16_t from_line, uint16_t to_line, BasicError *err, FILE *warn_out);
+
 // Renumbers stored lines starting at start_line with step increment, patching branch targets.
 // If any line would exceed 9999, aborts without modifying store and sets err->code = ERR_INTEGER_RANGE.
 bool program_renumber(Program *p, uint16_t start_line, uint16_t step, BasicError *err, FILE *warn_out);

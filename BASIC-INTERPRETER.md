@@ -496,12 +496,21 @@ ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted 
 * **Syntax:** `AUTO`, `AUTO <start>`, `AUTO <start>, <step>`
 * **Semantics:** Immediate mode only. Enters automatic line numbering mode (defaults: `start = 10`, `step = 10`). Automatically displays prompt prefixed with line number. Exits on blank line submission or interrupt.
 
-#### `RENUM [<new_start> [, <step>]]`
-* **Syntax:** `RENUM`, `RENUM <new_start>`, `RENUM <new_start>, <step>`
+#### `RENUM [<new_start> [, <step>]] [; [<oldstartline>] [TO [<oldendline>]]]`
+* **Syntax:**
+  * `RENUM`
+  * `RENUM <new_start>`
+  * `RENUM <new_start>, <step>`
+  * `RENUM [<new_start> [, <step>]] ; <oldstartline> TO [<oldendline>]`
+  * `RENUM [<new_start> [, <step>]] ; TO <oldendline>`
+  * `RENUM [<new_start> [, <step>]] ; <oldstartline>`
 * **Semantics:**
-  * Immediate mode only. Renumbers all stored lines starting from `new_start` (default 10) by increment `step` (default 10).
-  * If any renumbered line would exceed `9999`, the operation aborts without modifying memory and raises `B Integer out of range`.
-  * Rewrites integer target literals following branch keywords `GOTO`, `GOSUB`, and `RESTORE`.
+  * Immediate mode only. Renumbers stored program lines starting from `new_start` (default 10) by increment `step` (default 10).
+  * **Range Restriction (`[; [<oldstartline>] [TO [<oldendline>]]]`):**
+    * When specified, only stored program lines within the given range are renumbered. For example, `RENUM 1000; 200 TO` renumbers lines 200 upwards to start at 1000 with step 10.
+    * Lines outside the specified range preserve their existing line numbers.
+  * **Branch Target Patching:** Rewrites integer target literals across all program lines following branch keywords `GOTO`, `GOSUB`, `RESTORE`, and `THEN` to point to their updated line numbers.
+  * **Range & Collision Guard:** If any renumbered line would exceed `9999`, fall below `1`, or collide with an existing line outside the renumbered range, the operation aborts without modifying memory and raises report `B Integer out of range`.
 
 ---
 

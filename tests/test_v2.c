@@ -131,6 +131,57 @@ static void test_renum(void) {
 
     fclose(out);
     runtime_free(&rt);
+
+    // Test RENUM with range parameter '; [oldstartline] TO [oldendline]'
+    Runtime rt2;
+    runtime_init(&rt2);
+    FILE *out2 = tmpfile();
+    rt2.out = out2;
+
+    runtime_process_input(&rt2, "10 PRINT \"A\"", false);
+    runtime_process_input(&rt2, "20 GOTO 200", false);
+    runtime_process_input(&rt2, "200 PRINT \"B\"", false);
+    runtime_process_input(&rt2, "300 GOTO 10", false);
+    runtime_process_input(&rt2, "400 RETURN", false);
+
+    // RENUM 1000; 200 TO (lines 200 upwards start at 1000 with step 10)
+    runtime_process_input(&rt2, "RENUM 1000; 200 TO", false);
+    assert(rt2.last_error.code == ERR_OK);
+
+    assert(rt2.program.count == 5);
+    // Lines 10 and 20 are outside the range, so remain lines 10 and 20
+    assert(rt2.program.lines[0].line_no == 10);
+    assert(rt2.program.lines[1].line_no == 20);
+    // Branch target on line 20 (GOTO 200) was updated to new line 1000
+    assert(strcmp(rt2.program.lines[1].source, "GOTO 1000") == 0);
+
+    // Lines 200, 300, 400 renumbered to 1000, 1010, 1020
+    assert(rt2.program.lines[2].line_no == 1000);
+    assert(strcmp(rt2.program.lines[2].source, "PRINT \"B\"") == 0);
+    assert(rt2.program.lines[3].line_no == 1010);
+    // GOTO 10 untouched since line 10 was not renumbered
+    assert(strcmp(rt2.program.lines[3].source, "GOTO 10") == 0);
+    assert(rt2.program.lines[4].line_no == 1020);
+
+    // Test RENUM with bounded range: RENUM 500, 50; 1000 TO 1010
+    runtime_process_input(&rt2, "RENUM 500, 50; 1000 TO 1010", false);
+    assert(rt2.last_error.code == ERR_OK);
+    assert(rt2.program.lines[0].line_no == 10);
+    assert(rt2.program.lines[1].line_no == 20);
+    assert(strcmp(rt2.program.lines[1].source, "GOTO 500") == 0);
+    assert(rt2.program.lines[2].line_no == 500);
+    assert(rt2.program.lines[3].line_no == 550);
+    assert(rt2.program.lines[4].line_no == 1020);
+
+    // Test collision detection: renumbering 500 TO 550 to line 10 would collide with existing line 10
+    runtime_process_input(&rt2, "RENUM 10; 500 TO 550", false);
+    assert(rt2.last_error.code == ERR_INTEGER_RANGE);
+    // Program store remains unmodified
+    assert(rt2.program.lines[2].line_no == 500);
+    assert(rt2.program.lines[3].line_no == 550);
+
+    fclose(out2);
+    runtime_free(&rt2);
     printf("test_renum: PASS\n");
 }
 
