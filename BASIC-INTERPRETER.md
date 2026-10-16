@@ -468,10 +468,10 @@ ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted 
 * **Semantics:**
   * Pretty-prints the entire stored program to standard output with syntax highlighting, structured formatting, and control flow indicators.
   * **Line Numbers:** Formatted right-aligned to 4 digits (`%4u`).
-  * **Jump Targets:** Lines targeted by `GOTO`, `GOSUB`, `RUN`, `RESTORE`, or `THEN <number>` are highlighted with a prominent marker (`▶%4u`) in bold magenta (`\033[1;35m`).
+  * **Jump Targets & Initiators:** Lines targeted by `GOTO`, `GOSUB`, `RUN`, `RESTORE`, or `THEN <number>` are highlighted with a prominent marker (`▶%4u`) in bold magenta (`\033[1;35m`). Jump initiating instructions `GOTO` and `GOSUB` are likewise highlighted with the same matching color and triangle indicator (`\033[1;35m▶GOTO\033[0m`, `\033[1;35m▶GOSUB\033[0m`).
   * **Loop Indentation:** Indents nested code blocks inside `FOR` / `NEXT` loops by 2 spaces per nesting level. `NEXT` statements are dedented before printing.
   * **Syntax Highlighting:**
-    * Keywords: Bold yellow (`\033[1;33m`)
+    * Keywords: Bold yellow (`\033[1;33m`), except `GOTO`/`GOSUB` jump initiators which use bold magenta (`\033[1;35m▶...`)
     * String literals: Green (`\033[32m`)
     * Number literals: Magenta (`\033[35m`)
     * `REM` comments: Dim gray (`\033[90m`)

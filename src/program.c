@@ -283,7 +283,9 @@ void program_llist(const Program *p, FILE *out) {
                     break;
 
                 default:
-                    if (l.current.type >= TOKEN_LET && l.current.type <= TOKEN_INKEY_STR) {
+                    if (l.current.type == TOKEN_GOTO || l.current.type == TOKEN_GOSUB) {
+                        fprintf(out, "\033[1;35m▶%s\033[0m", token_type_name(l.current.type));
+                    } else if (l.current.type >= TOKEN_LET && l.current.type <= TOKEN_INKEY_STR) {
                         fprintf(out, "\033[1;33m%s\033[0m", token_type_name(l.current.type));
                     } else {
                         size_t tok_len = l.cursor > tok_start ? l.cursor - tok_start : 1;
