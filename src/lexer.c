@@ -88,6 +88,9 @@ const char *token_type_name(TokenType t) {
         case TOKEN_MOVE: return "MOVE";
         case TOKEN_COPY: return "COPY";
         case TOKEN_FORMAT: return "FORMAT";
+        case TOKEN_DEF: return "DEF";
+        case TOKEN_FN: return "FN";
+        case TOKEN_LLIST: return "LLIST";
         case TOKEN_ABS: return "ABS";
         case TOKEN_ACS: return "ACS";
         case TOKEN_ASN: return "ASN";
@@ -193,6 +196,9 @@ static TokenType match_keyword(const char *upper) {
     if (strcmp(upper, "MOVE") == 0) return TOKEN_MOVE;
     if (strcmp(upper, "COPY") == 0) return TOKEN_COPY;
     if (strcmp(upper, "FORMAT") == 0) return TOKEN_FORMAT;
+    if (strcmp(upper, "DEF") == 0) return TOKEN_DEF;
+    if (strcmp(upper, "FN") == 0) return TOKEN_FN;
+    if (strcmp(upper, "LLIST") == 0) return TOKEN_LLIST;
 
     if (strcmp(upper, "AND") == 0) return TOKEN_AND;
     if (strcmp(upper, "OR") == 0) return TOKEN_OR;
@@ -320,7 +326,7 @@ void lexer_next(Lexer *l) {
                 while (peek(l) != '\0' && peek(l) != '\n') {
                     advance(l);
                 }
-                l->current.type = TOKEN_EOF;
+                l->current.type = TOKEN_REM;
                 return;
             }
             l->current.type = kw;

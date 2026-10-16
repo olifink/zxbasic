@@ -38,6 +38,7 @@ void runtime_init(Runtime *rt) {
     symtab_init(&rt->symtab);
     sysvar_table_init(&rt->sysvars);
     rt->symtab.sysvars = &rt->sysvars;
+    rt->symtab.program = &rt->program;
     console_init(rt);
     rt->out = stdout;
     rt->in = stdin;
@@ -58,6 +59,7 @@ void runtime_clear(Runtime *rt) {
     runtime_channels_close_all(rt);
     symtab_clear(&rt->symtab);
     rt->symtab.sysvars = &rt->sysvars;
+    rt->symtab.program = &rt->program;
     rt->is_running = false;
     rt->stop_requested = false;
     rt->jump_requested = false;
@@ -104,6 +106,7 @@ void runtime_free(Runtime *rt) {
 void runtime_reset_for_run(Runtime *rt, uint16_t start_line) {
     symtab_clear(&rt->symtab);
     rt->symtab.sysvars = &rt->sysvars;
+    rt->symtab.program = &rt->program;
     rt->is_running = true;
     rt->stop_requested = false;
     rt->jump_requested = false;

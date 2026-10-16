@@ -15,7 +15,7 @@ typedef struct {
     char *source; // Raw text stripped of the leading line number
 } ProgramLine;
 
-typedef struct {
+typedef struct Program {
     ProgramLine *lines;
     size_t count;
     size_t capacity;
@@ -50,6 +50,9 @@ void program_list(const Program *p, uint16_t start_line, FILE *out);
 
 // Lists program lines to stream where line_no is between from and to (inclusive).
 void program_list_range(const Program *p, uint16_t from, uint16_t to, FILE *out);
+
+// Pretty prints entire program with syntax highlighting, right-aligned line numbers, loop indentation, and jump target indicators.
+void program_llist(const Program *p, FILE *out);
 
 // Renumbers stored lines starting at start_line with step increment, patching branch targets.
 // If any line would exceed 9999, aborts without modifying store and sets err->code = ERR_INTEGER_RANGE.

@@ -37,6 +37,15 @@ typedef struct {
 } StrArray;
 
 typedef struct {
+    char *name;             // Upper-case function name
+    char **params;          // Upper-case parameter names
+    size_t param_count;     // Number of parameters
+    char *expr_str;         // Expression body
+} UserFunc;
+
+struct Program;
+
+typedef struct {
     NumVar *num_vars;
     size_t num_vars_count;
     size_t num_vars_cap;
@@ -53,6 +62,11 @@ typedef struct {
     size_t str_arrays_count;
     size_t str_arrays_cap;
 
+    UserFunc *user_funcs;
+    size_t user_funcs_count;
+    size_t user_funcs_cap;
+
+    struct Program *program;
     struct SysVarTable *sysvars;
 } SymTab;
 
@@ -77,5 +91,10 @@ bool symtab_set_num_array(SymTab *st, const char *name, size_t nidx, const size_
 bool symtab_dim_str_array(SymTab *st, const char *name, size_t ndims, const size_t *dims, BasicError *err);
 bool symtab_get_str_array(const SymTab *st, const char *name, size_t nidx, const size_t *indices, Value *out, BasicError *err);
 bool symtab_set_str_array(SymTab *st, const char *name, size_t nidx, const size_t *indices, const Value *val, BasicError *err);
+
+// User Functions
+bool symtab_define_func(SymTab *st, const char *name, size_t param_count, const char *const *params, const char *expr_str);
+const UserFunc *symtab_find_func(SymTab *st, const char *name);
+bool symtab_remove_var(SymTab *st, const char *name);
 
 #endif // ZXBASIC_SYMTAB_H

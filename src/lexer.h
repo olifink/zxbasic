@@ -85,6 +85,9 @@ typedef enum {
     TOKEN_MOVE,
     TOKEN_COPY,
     TOKEN_FORMAT,
+    TOKEN_DEF,
+    TOKEN_FN,
+    TOKEN_LLIST,
 
     // Built-in functions
     TOKEN_ABS,

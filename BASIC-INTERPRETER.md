@@ -173,6 +173,20 @@ Substrings use 1-based indexing using parentheses and the `TO` keyword:
 | `VAL(s)` | `String -> Number` | Evaluates string $s$ as a valid BASIC numeric expression | Syntax error in $s$ raises `C Nonsense in BASIC` |
 | `INKEY$` | `() -> String` | Non-blocking single-key console read. Returns key or `""` | No argument required |
 
+### 5.3 User-Defined Functions (`DEF FN` and `FN`)
+
+* **Function Definition:** `DEF FN <fname>[(<param1> [, <param2> ...])] = <expression>`
+  * Defines a custom user function.
+  * Contrary to Sinclair BASIC (which restricted `fname` to a single letter), `fname` may be any valid identifier name (e.g. `hypot`, `square`, `pad$`).
+  * If `fname` ends with `$`, it defines a string function and its expression must evaluate to a string. Otherwise, it defines a numeric function returning a number.
+  * Parameter identifiers are formal parameters (numeric scalars or single-letter string scalars ending in `$`).
+  * Zero or more parameters are supported. If zero parameters are required, parentheses may be omitted or empty (`DEF FN pi() = 3.14159265`).
+* **Function Invocation:** `FN <fname>[(<arg1> [, <arg2> ...])]`
+  * Evaluates arguments and invokes the function within any numeric or string expression.
+  * **Scoping & Variable Shadowing:** Formal parameters dynamically shadow any existing global variables with identical names during function evaluation. When evaluation completes, existing outer variables are restored untouched. Non-parameter global variables remain readable within the function expression.
+  * **Forward References & On-Demand Discovery:** If `FN <fname>` is invoked before the program line defining `DEF FN <fname>` has executed, the runtime automatically searches the stored program for a matching `DEF FN <fname>` definition. If no definition exists, raises report `2 Variable not found`.
+  * **Recursion & Composition:** User functions can invoke other user functions or call themselves recursively (with recursion depth protection up to 256 calls).
+
 ---
 
 ## 6. Console Attributes, Terminal Model & System Variables
@@ -281,6 +295,10 @@ The interpreter maintains a table of system variables accessible to runtime rout
 #### `DIM <ident>(<dim1> [, <dim2> ...])`
 * **Syntax:** `DIM <ident>(<d1> [, <d2> ...])`
 * **Semantics:** Allocates an array. Dimensions must be positive integers. Arrays are 1-indexed. Re-dimensioning an already dimensioned identifier raises report `C Nonsense in BASIC`.
+
+#### `DEF FN <fname>[(<params>)] = <expr>`
+* **Syntax:** `DEF FN <fname>[(<param1> [, <param2> ...])] = <expr>`
+* **Semantics:** Registers a user-defined function in the symbol table. In stored program mode, execution skips past `DEF FN` without evaluating the expression body until invoked via `FN <fname>(...)`. See Section 5.3 for full specification.
 
 ---
 
@@ -444,6 +462,20 @@ ZXBasic implements Sinclair ZX Spectrum Interface 1 channel redirection adapted 
   * `LIST <start>`: Lists starting from line `<start>` through the end of the program.
   * `LIST <from> TO <to>`: Lists lines satisfying $from \le \text{line\_no} \le to$.
   * If $from > to$, no lines match and no output is produced.
+
+#### `LLIST`
+* **Syntax:** `LLIST`
+* **Semantics:**
+  * Pretty-prints the entire stored program to standard output with syntax highlighting, structured formatting, and control flow indicators.
+  * **Line Numbers:** Formatted right-aligned to 4 digits (`%4u`).
+  * **Jump Targets:** Lines targeted by `GOTO`, `GOSUB`, `RUN`, `RESTORE`, or `THEN <number>` are highlighted with a prominent marker (`▶%4u`) in bold magenta (`\033[1;35m`).
+  * **Loop Indentation:** Indents nested code blocks inside `FOR` / `NEXT` loops by 2 spaces per nesting level. `NEXT` statements are dedented before printing.
+  * **Syntax Highlighting:**
+    * Keywords: Bold yellow (`\033[1;33m`)
+    * String literals: Green (`\033[32m`)
+    * Number literals: Magenta (`\033[35m`)
+    * `REM` comments: Dim gray (`\033[90m`)
+  * `LLIST` always lists the entire program and does not accept line range arguments (supplying any arguments raises report `C Nonsense in BASIC`). Standard `LIST` remains strictly unchanged.
 
 #### `ERASE [<from>] TO [<to>]`
 * **Syntax:** `ERASE <from> TO <to>`, `ERASE TO <to>`, `ERASE <from> TO`, `ERASE TO`, `ERASE <line>`

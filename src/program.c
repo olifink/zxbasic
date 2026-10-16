@@ -173,6 +173,147 @@ void program_list(const Program *p, uint16_t start_line, FILE *out) {
 #include <math.h>
 #include <ctype.h>
 
+void program_llist(const Program *p, FILE *out) {
+    if (!p || !out || p->count == 0) return;
+
+    // 1. Scan program to identify GOTO/GOSUB/RUN/RESTORE/THEN jump target lines
+    bool is_target[10000];
+    memset(is_target, 0, sizeof(is_target));
+
+    for (size_t i = 0; i < p->count; i++) {
+        if (!p->lines[i].source) continue;
+        Lexer l;
+        lexer_init(&l, p->lines[i].source);
+        while (l.current.type != TOKEN_EOF) {
+            if (l.current.type == TOKEN_GOTO || l.current.type == TOKEN_GOSUB ||
+                l.current.type == TOKEN_RUN || l.current.type == TOKEN_RESTORE) {
+                lexer_next(&l);
+                if (l.current.type == TOKEN_NUMBER) {
+                    long tgt = (long)l.current.num_val;
+                    if (tgt >= 1 && tgt <= 9999) is_target[tgt] = true;
+                }
+                continue;
+            }
+            if (l.current.type == TOKEN_THEN) {
+                lexer_next(&l);
+                if (l.current.type == TOKEN_NUMBER) {
+                    long tgt = (long)l.current.num_val;
+                    if (tgt >= 1 && tgt <= 9999) is_target[tgt] = true;
+                }
+                continue;
+            }
+            lexer_next(&l);
+        }
+        token_free(&l.current);
+    }
+
+    // 2. Print each line with loop indentation and syntax coloring
+    int indent_level = 0;
+
+    for (size_t i = 0; i < p->count; i++) {
+        uint16_t line_no = p->lines[i].line_no;
+        const char *src = p->lines[i].source;
+        if (!src) continue;
+
+        // Pre-scan line for NEXT to dedent BEFORE printing this line
+        int line_for_count = 0;
+        int line_next_count = 0;
+        bool starts_with_next = false;
+        {
+            Lexer l;
+            lexer_init(&l, src);
+            if (l.current.type == TOKEN_NEXT) {
+                starts_with_next = true;
+            }
+            while (l.current.type != TOKEN_EOF) {
+                if (l.current.type == TOKEN_FOR) line_for_count++;
+                else if (l.current.type == TOKEN_NEXT) line_next_count++;
+                lexer_next(&l);
+            }
+            token_free(&l.current);
+        }
+
+        if (starts_with_next && indent_level > 0) {
+            indent_level--;
+            line_next_count--;
+        }
+
+        // Line number formatting: right-aligned 4 digits
+        if (line_no < 10000 && is_target[line_no]) {
+            fprintf(out, "\033[1;35m▶%4u \033[0m", (unsigned int)line_no);
+        } else {
+            fprintf(out, " \033[36m%4u \033[0m", (unsigned int)line_no);
+        }
+
+        // Indentation
+        for (int s = 0; s < indent_level * 2; s++) {
+            fputc(' ', out);
+        }
+
+        // Syntax highlighting
+        Lexer l;
+        lexer_init(&l, src);
+        size_t last_cursor = 0;
+
+        while (l.current.type != TOKEN_EOF) {
+            size_t tok_start = (l.current.col > 0) ? l.current.col - 1 : last_cursor;
+            if (tok_start > last_cursor && tok_start <= strlen(src)) {
+                for (size_t c = last_cursor; c < tok_start; c++) {
+                    fputc(src[c], out);
+                }
+            }
+
+            switch (l.current.type) {
+                case TOKEN_STRING:
+                    fprintf(out, "\033[32m\"%s\"\033[0m", l.current.str_val ? l.current.str_val : "");
+                    break;
+
+                case TOKEN_NUMBER: {
+                    size_t tok_len = l.cursor > tok_start ? l.cursor - tok_start : 0;
+                    fprintf(out, "\033[35m%.*s\033[0m", (int)tok_len, &src[tok_start]);
+                    break;
+                }
+
+                case TOKEN_REM:
+                    fprintf(out, "\033[90m%s\033[0m", &src[tok_start]);
+                    break;
+
+                case TOKEN_IDENT:
+                    fprintf(out, "%s", l.current.str_val ? l.current.str_val : "");
+                    break;
+
+                default:
+                    if (l.current.type >= TOKEN_LET && l.current.type <= TOKEN_INKEY_STR) {
+                        fprintf(out, "\033[1;33m%s\033[0m", token_type_name(l.current.type));
+                    } else {
+                        size_t tok_len = l.cursor > tok_start ? l.cursor - tok_start : 1;
+                        fprintf(out, "%.*s", (int)tok_len, &src[tok_start]);
+                    }
+                    break;
+            }
+
+            if (l.current.type == TOKEN_REM) {
+                last_cursor = strlen(src);
+                break;
+            }
+
+            last_cursor = l.cursor;
+            lexer_next(&l);
+        }
+
+        if (last_cursor < strlen(src)) {
+            fputs(&src[last_cursor], out);
+        }
+
+        token_free(&l.current);
+        fprintf(out, "\033[0m\n");
+
+        indent_level += line_for_count;
+        indent_level -= line_next_count;
+        if (indent_level < 0) indent_level = 0;
+    }
+}
+
 typedef struct {
     uint16_t old_line;
     uint16_t new_line;

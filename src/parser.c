@@ -1243,7 +1243,7 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
 
     switch (t) {
         case TOKEN_REM:
-            // Handled in lexer
+            lexer_next(l);
             return true;
 
         case TOKEN_LET:
@@ -1459,6 +1459,93 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
 
             program_list_range(&rt->program, from, to, rt->out);
             return true;
+        }
+
+        case TOKEN_LLIST:
+            lexer_next(l);
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            program_llist(&rt->program, rt->out);
+            return true;
+
+        case TOKEN_DEF: {
+            lexer_next(l);
+            if (l->current.type != TOKEN_FN) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            lexer_next(l);
+            if (l->current.type != TOKEN_IDENT) {
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+            char *fname = strdup(l->current.str_val);
+            lexer_next(l);
+
+            char *params[32];
+            size_t param_count = 0;
+            if (l->current.type == TOKEN_LPAREN) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_RPAREN) {
+                    while (param_count < 32) {
+                        if (l->current.type != TOKEN_IDENT) {
+                            for (size_t k = 0; k < param_count; k++) free(params[k]);
+                            free(fname);
+                            rt->last_error.code = ERR_NONSENSE;
+                            return false;
+                        }
+                        params[param_count++] = strdup(l->current.str_val);
+                        lexer_next(l);
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l);
+                        } else if (l->current.type == TOKEN_RPAREN) {
+                            break;
+                        } else {
+                            for (size_t k = 0; k < param_count; k++) free(params[k]);
+                            free(fname);
+                            rt->last_error.code = ERR_NONSENSE;
+                            return false;
+                        }
+                    }
+                }
+                if (l->current.type != TOKEN_RPAREN) {
+                    for (size_t k = 0; k < param_count; k++) free(params[k]);
+                    free(fname);
+                    rt->last_error.code = ERR_NONSENSE;
+                    return false;
+                }
+                lexer_next(l); // consume ')'
+            }
+
+            if (l->current.type != TOKEN_EQUAL) {
+                for (size_t k = 0; k < param_count; k++) free(params[k]);
+                free(fname);
+                rt->last_error.code = ERR_NONSENSE;
+                return false;
+            }
+
+            size_t expr_start = l->cursor;
+            const char *src = l->source;
+            while (src[expr_start] == ' ' || src[expr_start] == '\t') expr_start++;
+            size_t expr_end = expr_start;
+            lexer_next(l);
+            while (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                expr_end = l->cursor;
+                lexer_next(l);
+            }
+
+            char expr_buf[1024];
+            size_t elen = expr_end > expr_start ? expr_end - expr_start : strlen(&src[expr_start]);
+            if (elen >= sizeof(expr_buf)) elen = sizeof(expr_buf) - 1;
+            memcpy(expr_buf, &src[expr_start], elen);
+            expr_buf[elen] = '\0';
+
+            bool ok = symtab_define_func(&rt->symtab, fname, param_count, (const char *const *)params, expr_buf);
+            for (size_t k = 0; k < param_count; k++) free(params[k]);
+            free(fname);
+            return ok;
         }
 
         case TOKEN_NEW:

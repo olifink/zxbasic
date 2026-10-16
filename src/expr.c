@@ -283,6 +283,185 @@ static Value parse_primary(Lexer *l, SymTab *st, BasicError *err) {
         return value_string("");
     }
 
+    // User function invocation: FN fname [( [arg1 [, arg2...]] )]
+    if (l->current.type == TOKEN_FN) {
+        lexer_next(l);
+        if (l->current.type != TOKEN_IDENT) {
+            if (err) err->code = ERR_NONSENSE;
+            return value_nil();
+        }
+        char *fname = strdup(l->current.str_val);
+        lexer_next(l);
+
+        const UserFunc *uf = symtab_find_func(st, fname);
+        if (!uf) {
+            free(fname);
+            if (err) err->code = ERR_NONSENSE;
+            return value_nil();
+        }
+
+        // Parse arguments
+        Value args[32];
+        size_t arg_count = 0;
+        if (l->current.type == TOKEN_LPAREN) {
+            lexer_next(l);
+            if (l->current.type != TOKEN_RPAREN) {
+                while (arg_count < 32) {
+                    Value a = expr_eval(l, st, err);
+                    if (err && err->code != ERR_OK) {
+                        for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+                        free(fname);
+                        return value_nil();
+                    }
+                    args[arg_count++] = a;
+                    if (l->current.type == TOKEN_COMMA) {
+                        lexer_next(l);
+                    } else if (l->current.type == TOKEN_RPAREN) {
+                        break;
+                    } else {
+                        for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+                        free(fname);
+                        if (err) err->code = ERR_NONSENSE;
+                        return value_nil();
+                    }
+                }
+            }
+            if (l->current.type != TOKEN_RPAREN) {
+                for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+                free(fname);
+                if (err) err->code = ERR_NONSENSE;
+                return value_nil();
+            }
+            lexer_next(l); // consume ')'
+        }
+
+        // Validate argument count
+        if (arg_count != uf->param_count) {
+            for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+            free(fname);
+            if (err) err->code = ERR_NONSENSE;
+            return value_nil();
+        }
+
+        // Validate argument types
+        for (size_t k = 0; k < arg_count; k++) {
+            bool param_is_str = (uf->params[k][strlen(uf->params[k]) - 1] == '$');
+            if (param_is_str && !value_is_str(&args[k])) {
+                for (size_t j = 0; j < arg_count; j++) value_free(&args[j]);
+                free(fname);
+                if (err) err->code = ERR_NONSENSE;
+                return value_nil();
+            }
+            if (!param_is_str && !value_is_num(&args[k])) {
+                for (size_t j = 0; j < arg_count; j++) value_free(&args[j]);
+                free(fname);
+                if (err) err->code = ERR_NONSENSE;
+                return value_nil();
+            }
+        }
+
+        // Recursion depth protection
+        static int fn_depth = 0;
+        if (fn_depth > 256) {
+            for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+            free(fname);
+            if (err) err->code = ERR_OUT_OF_MEMORY;
+            return value_nil();
+        }
+        fn_depth++;
+
+        // Save old variable states for parameter names
+        typedef struct {
+            char *name;
+            bool existed;
+            bool is_str;
+            double num_val;
+            char *str_val;
+            size_t str_len;
+        } SavedVar;
+
+        SavedVar saved[32];
+        for (size_t k = 0; k < arg_count; k++) {
+            saved[k].name = uf->params[k];
+            saved[k].existed = false;
+            saved[k].is_str = (uf->params[k][strlen(uf->params[k]) - 1] == '$');
+            saved[k].str_val = NULL;
+            saved[k].str_len = 0;
+            saved[k].num_val = 0;
+
+            if (saved[k].is_str) {
+                const char *old_s = NULL;
+                size_t old_l = 0;
+                if (symtab_get_str(st, uf->params[k], &old_s, &old_l)) {
+                    saved[k].existed = true;
+                    saved[k].str_val = malloc(old_l + 1);
+                    memcpy(saved[k].str_val, old_s, old_l);
+                    saved[k].str_val[old_l] = '\0';
+                    saved[k].str_len = old_l;
+                }
+                symtab_set_str(st, uf->params[k], args[k].as.str.chars, args[k].as.str.len);
+            } else {
+                double old_n = 0;
+                if (symtab_get_num(st, uf->params[k], &old_n)) {
+                    saved[k].existed = true;
+                    saved[k].num_val = old_n;
+                }
+                symtab_set_num(st, uf->params[k], args[k].as.num);
+            }
+        }
+
+        // Clean up evaluated arguments
+        for (size_t k = 0; k < arg_count; k++) value_free(&args[k]);
+
+        // Copy body string so it remains valid during evaluation
+        char *body = strdup(uf->expr_str);
+
+        // Evaluate body expression
+        Lexer body_l;
+        lexer_init(&body_l, body);
+        Value result = expr_eval(&body_l, st, err);
+        token_free(&body_l.current);
+        free(body);
+
+        // Restore saved variables
+        for (size_t k = 0; k < arg_count; k++) {
+            if (saved[k].existed) {
+                if (saved[k].is_str) {
+                    symtab_set_str(st, saved[k].name, saved[k].str_val, saved[k].str_len);
+                    free(saved[k].str_val);
+                } else {
+                    symtab_set_num(st, saved[k].name, saved[k].num_val);
+                }
+            } else {
+                symtab_remove_var(st, saved[k].name);
+            }
+        }
+
+        fn_depth--;
+
+        // Type check return value
+        bool func_is_str = (fname[strlen(fname) - 1] == '$');
+        free(fname);
+
+        if (err && err->code != ERR_OK) {
+            value_free(&result);
+            return value_nil();
+        }
+
+        if (func_is_str && !value_is_str(&result)) {
+            value_free(&result);
+            if (err) err->code = ERR_NONSENSE;
+            return value_nil();
+        }
+        if (!func_is_str && !value_is_num(&result)) {
+            value_free(&result);
+            if (err) err->code = ERR_NONSENSE;
+            return value_nil();
+        }
+
+        return result;
+    }
+
     // Built-in functions requiring parentheses
     switch (l->current.type) {
         case TOKEN_ABS:

@@ -17,6 +17,7 @@ static bool is_zx_keyword(const char *upper) {
         "INK", "PAPER", "BRIGHT", "INVERSE", "AT",
         "MERGE", "CAT", "ERASE", "LINE",
         "OPEN", "CLOSE", "MOVE", "COPY", "FORMAT",
+        "DEF", "FN", "LLIST",
         "AND", "OR", "NOT",
         "ABS", "ACS", "ASN", "ATN", "COS", "EXP", "INT", "LN", "RND",
         "SGN", "SIN", "SQR", "TAN",
@@ -218,6 +219,34 @@ static bool validate_primary(Lexer *l, size_t *err_col) {
             break;
     }
 
+    // User function invocation: FN fname [( [arg1 [, arg2...]] )]
+    if (l->current.type == TOKEN_FN) {
+        lexer_next(l);
+        if (l->current.type != TOKEN_IDENT) {
+            *err_col = l->current.col;
+            return false;
+        }
+        lexer_next(l);
+        if (l->current.type == TOKEN_LPAREN) {
+            lexer_next(l);
+            if (l->current.type != TOKEN_RPAREN) {
+                while (true) {
+                    if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                    if (l->current.type == TOKEN_COMMA) {
+                        lexer_next(l);
+                    } else if (l->current.type == TOKEN_RPAREN) {
+                        break;
+                    } else {
+                        *err_col = l->current.col;
+                        return false;
+                    }
+                }
+            }
+            lexer_next(l);
+        }
+        return true;
+    }
+
     // Identifiers (variables, arrays, slicing)
     if (l->current.type == TOKEN_IDENT) {
         lexer_next(l);
@@ -290,7 +319,7 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
 
     switch (t) {
         case TOKEN_REM:
-            // Consumed till EOF by lexer
+            lexer_next(l);
             return true;
 
         case TOKEN_LET: {
@@ -728,6 +757,55 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
         case TOKEN_FORMAT:
             lexer_next(l);
             return validate_precedence(l, VPREC_NONE, err_col);
+
+        case TOKEN_DEF: {
+            lexer_next(l);
+            if (l->current.type != TOKEN_FN) {
+                *err_col = l->current.col;
+                return false;
+            }
+            lexer_next(l);
+            if (l->current.type != TOKEN_IDENT) {
+                *err_col = l->current.col;
+                return false;
+            }
+            lexer_next(l);
+            if (l->current.type == TOKEN_LPAREN) {
+                lexer_next(l);
+                if (l->current.type != TOKEN_RPAREN) {
+                    while (true) {
+                        if (l->current.type != TOKEN_IDENT) {
+                            *err_col = l->current.col;
+                            return false;
+                        }
+                        lexer_next(l);
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l);
+                        } else if (l->current.type == TOKEN_RPAREN) {
+                            break;
+                        } else {
+                            *err_col = l->current.col;
+                            return false;
+                        }
+                    }
+                }
+                lexer_next(l);
+            }
+            if (l->current.type != TOKEN_EQUAL) {
+                *err_col = l->current.col;
+                return false;
+            }
+            lexer_next(l);
+            return validate_precedence(l, VPREC_NONE, err_col);
+        }
+
+        case TOKEN_LLIST:
+            lexer_next(l);
+            if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                *err_col = l->current.col;
+                return false;
+            }
+            return true;
 
         // Immediate-only commands are forbidden in stored program lines
         case TOKEN_EDIT:
