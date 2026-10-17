@@ -1133,6 +1133,7 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
 
     struct stat st;
     bool is_exec = false;
+    bool is_local = false;
 
     char cmd_binary[512];
     strncpy(cmd_binary, path, sizeof(cmd_binary) - 1);
@@ -1142,8 +1143,20 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
     char *sp = strchr(cb, ' ');
     if (sp) *sp = '\0';
 
+    char exe_dir[1024] = {0};
+    ssize_t elen = readlink("/proc/self/exe", exe_dir, sizeof(exe_dir) - 1);
+    if (elen > 0) {
+        exe_dir[elen] = '\0';
+        char *slash = strrchr(exe_dir, '/');
+        if (slash) *slash = '\0';
+        else exe_dir[0] = '\0';
+    }
+
     if (stat(cb, &st) == 0 && S_ISREG(st.st_mode) && access(cb, X_OK) == 0) {
         is_exec = true;
+        if (strchr(cb, '/') == NULL) {
+            is_local = true;
+        }
     } else if (strchr(cb, '/') == NULL) {
         const char *env_path = getenv("PATH");
         if (env_path) {
@@ -1159,6 +1172,13 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
                 dir = strtok(NULL, ":");
             }
             free(pcopy);
+        }
+        if (!is_exec && exe_dir[0]) {
+            char test_path[1024];
+            snprintf(test_path, sizeof(test_path), "%s/%s", exe_dir, cb);
+            if (stat(test_path, &st) == 0 && S_ISREG(st.st_mode) && access(test_path, X_OK) == 0) {
+                is_exec = true;
+            }
         }
     }
 
@@ -1177,6 +1197,20 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
         int out_fd = out_fp ? fileno(out_fp) : STDOUT_FILENO;
         int err_fd = err_fp ? fileno(err_fp) : STDERR_FILENO;
 
+        char exec_cmd[4096];
+        if (is_local) {
+            const char *p = path;
+            while (*p && isspace((unsigned char)*p)) p++;
+            size_t cblen = strlen(cb);
+            if (strncmp(p, cb, cblen) == 0) {
+                snprintf(exec_cmd, sizeof(exec_cmd), "./%s%s", cb, p + cblen);
+            } else {
+                snprintf(exec_cmd, sizeof(exec_cmd), "./%s", path);
+            }
+        } else {
+            snprintf(exec_cmd, sizeof(exec_cmd), "%s", path);
+        }
+
         pid_t pid = fork();
         if (pid < 0) {
             rt->last_error.code = ERR_NONSENSE;
@@ -1192,7 +1226,25 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
             if (err_fd != STDERR_FILENO) {
                 dup2(err_fd, STDERR_FILENO);
             }
-            execl("/bin/sh", "sh", "-c", path, (char *)NULL);
+
+            char new_path[4096];
+            const char *old_path = getenv("PATH");
+            if (old_path && old_path[0]) {
+                if (exe_dir[0]) {
+                    snprintf(new_path, sizeof(new_path), ".:%s:%s", exe_dir, old_path);
+                } else {
+                    snprintf(new_path, sizeof(new_path), ".:%s", old_path);
+                }
+            } else {
+                if (exe_dir[0]) {
+                    snprintf(new_path, sizeof(new_path), ".:%s:/usr/local/bin:/usr/bin:/bin", exe_dir);
+                } else {
+                    snprintf(new_path, sizeof(new_path), ".:/usr/local/bin:/usr/bin:/bin");
+                }
+            }
+            setenv("PATH", new_path, 1);
+
+            execl("/bin/sh", "sh", "-c", exec_cmd, (char *)NULL);
             _exit(127);
         }
 

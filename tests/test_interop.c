@@ -348,9 +348,27 @@ static void test_run_subprocess_execution(void) {
     runtime_process_input(&rt, "RUN \"echo Fail\" TO #1", true);
     assert(rt.last_error.code == ERR_NONSENSE);
 
-    // Non-existent target file raises ERR_NONSENSE
-    runtime_process_input(&rt, "RUN \"non_existent_file_xyz_123\"", true);
-    assert(rt.last_error.code == ERR_NONSENSE);
+    // 6. Local executable without ./ prefix executes without 'not found' error
+    const char *local_exec = "test_local_runner.sh";
+    unlink(local_exec);
+    FILE *lex = fopen(local_exec, "w");
+    assert(lex != NULL);
+    fprintf(lex, "#!/bin/sh\necho \"LOCAL_OK\"\n");
+    fclose(lex);
+    chmod(local_exec, 0755);
+
+    runtime_process_input(&rt, "OPEN #5, \"test_local_out.txt\"", true);
+    runtime_process_input(&rt, "RUN \"test_local_runner.sh\" TO , #5", true);
+    assert(rt.last_error.code == ERR_OK);
+    runtime_process_input(&rt, "CLOSE #5", true);
+
+    FILE *lout = fopen("test_local_out.txt", "r");
+    assert(lout != NULL);
+    assert(fgets(buf, sizeof(buf), lout) != NULL);
+    assert(strstr(buf, "LOCAL_OK") != NULL);
+    fclose(lout);
+    unlink(local_exec);
+    unlink("test_local_out.txt");
 
     fclose(out);
     fclose(err);
