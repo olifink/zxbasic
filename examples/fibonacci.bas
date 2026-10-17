@@ -8,5 +8,4 @@
 80 LET a = b
 90 LET b = nxt
 100 NEXT i
-110 PRINT ""
-120 STOP
+110 PRINT
