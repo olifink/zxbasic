@@ -646,6 +646,10 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
         case TOKEN_SAVE:
             lexer_next(l);
             if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+            if (l->current.type == TOKEN_CODE) {
+                lexer_next(l);
+                return true;
+            }
             if (l->current.type == TOKEN_LINE) {
                 lexer_next(l);
                 if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
@@ -658,6 +662,27 @@ static bool validate_statement(Lexer *l, size_t *err_col) {
             lexer_next(l);
             if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
                 if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                if (l->current.type == TOKEN_TO) {
+                    lexer_next(l);
+                    for (int slot = 0; slot < 3; slot++) {
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l);
+                            continue;
+                        }
+                        if (l->current.type == TOKEN_HASH) {
+                            lexer_next(l);
+                        }
+                        if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON && l->current.type != TOKEN_COMMA) {
+                            if (!validate_precedence(l, VPREC_NONE, err_col)) return false;
+                        }
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l);
+                        } else {
+                            break;
+                        }
+                    }
+                    return true;
+                }
                 if (l->current.type == TOKEN_COMMA) {
                     lexer_next(l);
                     if (!validate_precedence(l, VPREC_NONE, err_col)) return false;

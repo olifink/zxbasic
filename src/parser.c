@@ -337,7 +337,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
     lexer_next(l); // consume PRINT
 
     int channel_no = 2;
-    FILE *dest_fp = rt->out;
+    FILE *dest_fp = runtime_channel_get_fp(rt, 1);
     bool is_channel = false;
 
     if (l->current.type == TOKEN_HASH) {
@@ -366,7 +366,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             rt->last_error.code = ERR_NONSENSE;
             return false;
         }
-        dest_fp = rt->channels[channel_no].fp ? rt->channels[channel_no].fp : (channel_no == 2 ? rt->out : (channel_no == 3 ? stderr : NULL));
+        dest_fp = runtime_channel_get_fp(rt, channel_no);
         if (!dest_fp) {
             rt->last_error.code = ERR_NONSENSE;
             return false;
@@ -377,6 +377,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
     }
 
+    bool is_screen = (!is_channel || channel_no == 1) && (dest_fp == rt->out);
     bool ended_with_separator = false;
     bool modified_temp_attrs = false;
     int ch_col = 0;
@@ -389,7 +390,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
         if (l->current.type == TOKEN_COMMA) {
             ended_with_separator = true;
-            if (is_channel && channel_no != 2) {
+            if (!is_screen) {
                 int next_tab = ((ch_col / 16) + 1) * 16;
                 int spaces = next_tab - ch_col;
                 for (int sp = 0; sp < spaces; sp++) fputc(' ', dest_fp);
@@ -402,7 +403,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
         }
         if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            if (is_channel && channel_no != 2) {
+            if (!is_screen) {
                 fputc('\n', dest_fp);
                 ch_col = 0;
             } else {
@@ -412,7 +413,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             continue;
         }
         if (l->current.type == TOKEN_AT) {
-            if (is_channel && channel_no != 2) {
+            if (!is_screen) {
                 lexer_next(l);
                 Value rv = expr_eval(l, &rt->symtab, &rt->last_error);
                 if (rt->last_error.code != ERR_OK) goto cleanup;
@@ -447,7 +448,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             Value val = expr_eval(l, &rt->symtab, &rt->last_error);
             if (rt->last_error.code != ERR_OK) goto cleanup;
             if (!value_is_num(&val)) { rt->last_error.code = ERR_NONSENSE; goto cleanup; }
-            if (!is_channel || channel_no == 2) {
+            if (is_screen) {
                 if (attr_tok == TOKEN_INK) console_set_temporary_ink(rt, (int64_t)floor(val.as.num), &rt->last_error);
                 else if (attr_tok == TOKEN_PAPER) console_set_temporary_paper(rt, (int64_t)floor(val.as.num), &rt->last_error);
                 else if (attr_tok == TOKEN_BRIGHT) console_set_temporary_bright(rt, (int64_t)floor(val.as.num), &rt->last_error);
@@ -464,7 +465,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
 
         char *s = value_to_str(&v);
         size_t slen = strlen(s);
-        if (is_channel && channel_no != 2) {
+        if (!is_screen) {
             fputs(s, dest_fp);
             ch_col += (int)slen;
         } else {
@@ -481,7 +482,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             lexer_next(l);
         } else if (l->current.type == TOKEN_COMMA) {
             ended_with_separator = true;
-            if (is_channel && channel_no != 2) {
+            if (!is_screen) {
                 int next_tab = ((ch_col / 16) + 1) * 16;
                 int spaces = next_tab - ch_col;
                 for (int sp = 0; sp < spaces; sp++) fputc(' ', dest_fp);
@@ -492,7 +493,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
             lexer_next(l);
         } else if (l->current.type == TOKEN_APOSTROPHE) {
             ended_with_separator = false;
-            if (is_channel && channel_no != 2) {
+            if (!is_screen) {
                 fputc('\n', dest_fp);
                 ch_col = 0;
             } else {
@@ -503,7 +504,7 @@ static bool parse_print(Lexer *l, Runtime *rt) {
     }
 
     if (!ended_with_separator) {
-        if (is_channel && channel_no != 2) {
+        if (!is_screen) {
             fputc('\n', dest_fp);
         } else {
             print_newline(rt);
@@ -641,7 +642,7 @@ static bool parse_input(Lexer *l, Runtime *rt) {
             rt->last_error.code = ERR_NONSENSE;
             return false;
         }
-        FILE *in_fp = rt->channels[channel_no].fp ? rt->channels[channel_no].fp : (channel_no == 0 || channel_no == 1 ? (rt->in ? rt->in : stdin) : NULL);
+        FILE *in_fp = runtime_channel_get_fp(rt, channel_no);
         if (!in_fp) {
             rt->last_error.code = ERR_NONSENSE;
             return false;
@@ -762,7 +763,7 @@ static bool parse_input(Lexer *l, Runtime *rt) {
     lexer_next(l);
 
     char line_buf[1024];
-    if (!fgets(line_buf, sizeof(line_buf), rt->in ? rt->in : stdin)) {
+    if (!fgets(line_buf, sizeof(line_buf), runtime_channel_get_fp(rt, 0))) {
         if (g_interrupted || errno == EINTR) {
             g_interrupted = 0;
             rt->stop_requested = true;
@@ -1345,34 +1346,94 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
                     path[sizeof(path) - 1] = '\0';
                     value_free(&v);
 
-                    if (l->current.type == TOKEN_COMMA) {
-                        lexer_next(l);
-                    }
-                    if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
-                        Value line_v = expr_eval(l, &rt->symtab, &rt->last_error);
-                        if (rt->last_error.code != ERR_OK) return false;
-                        if (!value_is_num(&line_v)) {
+                    bool has_redirection = false;
+                    int in_ch = 0;
+                    int out_ch = 1;
+                    int err_ch = 2;
+
+                    if (l->current.type == TOKEN_TO) {
+                        has_redirection = true;
+                        lexer_next(l); // consume TO
+
+                        // Parse stdin channel (slot 1)
+                        if (l->current.type != TOKEN_COMMA) {
+                            if (l->current.type == TOKEN_HASH) {
+                                lexer_next(l);
+                            }
+                            Value ch1 = expr_eval(l, &rt->symtab, &rt->last_error);
+                            if (rt->last_error.code != ERR_OK) return false;
+                            if (!value_is_num(&ch1)) { value_free(&ch1); rt->last_error.code = ERR_NONSENSE; return false; }
+                            double d1 = ch1.as.num;
+                            value_free(&ch1);
+                            if (d1 < 0 || d1 >= MAX_CHANNELS || floor(d1) != d1) {
+                                rt->last_error.code = ERR_INTEGER_RANGE;
+                                return false;
+                            }
+                            in_ch = (int)d1;
+                        }
+
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l); // consume comma
+                            // Parse stdout channel (slot 2)
+                            if (l->current.type != TOKEN_COMMA && l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                                if (l->current.type == TOKEN_HASH) {
+                                    lexer_next(l);
+                                }
+                                Value ch2 = expr_eval(l, &rt->symtab, &rt->last_error);
+                                if (rt->last_error.code != ERR_OK) return false;
+                                if (!value_is_num(&ch2)) { value_free(&ch2); rt->last_error.code = ERR_NONSENSE; return false; }
+                                double d2 = ch2.as.num;
+                                value_free(&ch2);
+                                if (d2 < 0 || d2 >= MAX_CHANNELS || floor(d2) != d2) {
+                                    rt->last_error.code = ERR_INTEGER_RANGE;
+                                    return false;
+                                }
+                                out_ch = (int)d2;
+                            }
+
+                            if (l->current.type == TOKEN_COMMA) {
+                                lexer_next(l); // consume comma
+                                // Parse stderr channel (slot 3)
+                                if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                                    if (l->current.type == TOKEN_HASH) {
+                                        lexer_next(l);
+                                    }
+                                    Value ch3 = expr_eval(l, &rt->symtab, &rt->last_error);
+                                    if (rt->last_error.code != ERR_OK) return false;
+                                    if (!value_is_num(&ch3)) { value_free(&ch3); rt->last_error.code = ERR_NONSENSE; return false; }
+                                    double d3 = ch3.as.num;
+                                    value_free(&ch3);
+                                    if (d3 < 0 || d3 >= MAX_CHANNELS || floor(d3) != d3) {
+                                        rt->last_error.code = ERR_INTEGER_RANGE;
+                                        return false;
+                                    }
+                                    err_ch = (int)d3;
+                                }
+                            }
+                        }
+                    } else {
+                        if (l->current.type == TOKEN_COMMA) {
+                            lexer_next(l);
+                        }
+                        if (l->current.type != TOKEN_EOF && l->current.type != TOKEN_COLON) {
+                            Value line_v = expr_eval(l, &rt->symtab, &rt->last_error);
+                            if (rt->last_error.code != ERR_OK) return false;
+                            if (!value_is_num(&line_v)) {
+                                value_free(&line_v);
+                                rt->last_error.code = ERR_NONSENSE;
+                                return false;
+                            }
+                            double d = line_v.as.num;
                             value_free(&line_v);
-                            rt->last_error.code = ERR_NONSENSE;
-                            return false;
+                            if (d < 1.0 || d > 9999.0 || floor(d) != d) {
+                                rt->last_error.code = ERR_INTEGER_RANGE;
+                                return false;
+                            }
+                            start_line = (uint16_t)d;
                         }
-                        double d = line_v.as.num;
-                        value_free(&line_v);
-                        if (d < 1.0 || d > 9999.0 || floor(d) != d) {
-                            rt->last_error.code = ERR_INTEGER_RANGE;
-                            return false;
-                        }
-                        start_line = (uint16_t)d;
                     }
 
-                    rt->auto_ran = false;
-                    if (!runtime_load(rt, path)) return false;
-                    if (start_line > 0) {
-                        runtime_run(rt, start_line);
-                    } else if (!rt->auto_ran) {
-                        runtime_run(rt, 0);
-                    }
-                    return true;
+                    return runtime_run_file_redirect(rt, path, start_line, has_redirection, in_ch, out_ch, err_ch);
                 } else if (value_is_num(&v)) {
                     double d = v.as.num;
                     value_free(&v);
@@ -1676,6 +1737,13 @@ bool parser_execute_statement(Lexer *l, Runtime *rt, size_t next_stmt_offset, bo
                 value_free(&path_val);
                 rt->last_error.code = ERR_NONSENSE;
                 return false;
+            }
+
+            if (l->current.type == TOKEN_CODE) {
+                lexer_next(l);
+                bool ok = runtime_save_code(rt, path_val.as.str.chars);
+                value_free(&path_val);
+                return ok;
             }
 
             bool has_line = false;

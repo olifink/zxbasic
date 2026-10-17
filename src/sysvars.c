@@ -58,6 +58,9 @@ void sysvar_table_init(SysVarTable *table) {
 
     sysvar_register(table, "SCR_COLS", SVAR_TYPE_INT, SVAR_FLAG_READ_ONLY);
     sysvar_set_int(table, "SCR_COLS", cols);
+
+    sysvar_register(table, "STATUS", SVAR_TYPE_INT, SVAR_FLAG_READ_ONLY);
+    sysvar_set_int(table, "STATUS", 0);
 }
 
 void sysvar_table_free(SysVarTable *table) {
@@ -83,6 +86,7 @@ void sysvar_table_reset_defaults(SysVarTable *table) {
     sysvar_set_int(table, "ATTR_T_INVERSE", -2);
     sysvar_set_int(table, "S_POSN_ROW", 0);
     sysvar_set_int(table, "S_POSN_COL", 0);
+    sysvar_set_int(table, "STATUS", 0);
 }
 
 SysVar *sysvar_lookup(SysVarTable *table, const char *name) {

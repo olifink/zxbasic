@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
     }
 
     bool is_interactive = isatty(STDIN_FILENO);
+    bool first_stdin_line = true;
 
     if (is_interactive) {
         printf("zxbasic (Modern Sinclair BASIC for POSIX)\n");
@@ -81,6 +82,14 @@ int main(int argc, char **argv) {
                     continue;
                 }
                 break;
+            }
+            if (first_stdin_line) {
+                first_stdin_line = false;
+                const char *sp = buf;
+                while (*sp && isspace((unsigned char)*sp)) sp++;
+                if (sp[0] == '#' && sp[1] == '!') {
+                    continue;
+                }
             }
             size_t blen = strlen(buf);
             while (blen > 0 && (buf[blen - 1] == '\r' || buf[blen - 1] == '\n')) {

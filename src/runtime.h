@@ -110,6 +110,7 @@ typedef struct Runtime {
     bool auto_ran;
     FILE *out;
     FILE *in;
+    FILE *err;
     Channel channels[MAX_CHANNELS];
 } Runtime;
 
@@ -134,6 +135,7 @@ void runtime_execute_line(Runtime *rt, const char *line_text, int32_t line_no);
 
 // Runs the stored program starting at start_line (or 0 for beginning)
 void runtime_run(Runtime *rt, uint16_t start_line);
+bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_line, bool has_redirection, int in_ch, int out_ch, int err_ch);
 
 // Process a single REPL or script input line (storing numbered lines, executing direct lines)
 // Returns true on success, false on error/rejection.
@@ -142,6 +144,7 @@ bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive);
 // Persistence & Filesystem
 bool runtime_save(Runtime *rt, const char *path);
 bool runtime_save_ext(Runtime *rt, const char *path, bool has_line, uint16_t line_no);
+bool runtime_save_code(Runtime *rt, const char *path);
 bool runtime_load(Runtime *rt, const char *path);
 bool runtime_merge(Runtime *rt, const char *path);
 bool runtime_cat(Runtime *rt, const char *subpath);
@@ -153,6 +156,7 @@ bool runtime_erase_recursive(Runtime *rt, const char *path);
 void runtime_channels_init(Runtime *rt);
 void runtime_channels_close_all(Runtime *rt);
 bool runtime_channel_open(Runtime *rt, int channel_no, const char *path);
+FILE *runtime_channel_get_fp(Runtime *rt, int ch);
 bool runtime_channel_close(Runtime *rt, int channel_no);
 bool runtime_channel_move(Runtime *rt, int src_ch, int dest_ch);
 bool runtime_format_dir(Runtime *rt, const char *path);

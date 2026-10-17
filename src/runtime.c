@@ -10,6 +10,7 @@
 #include <math.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <errno.h>
@@ -32,6 +33,14 @@ void setup_signal_handlers(void) {
     sigaction(SIGINT, &sa, NULL);
 }
 
+static FILE *runtime_get_report_fp(Runtime *rt) {
+    if (!rt) return stderr;
+    if (rt->channels[2].fp) return rt->channels[2].fp;
+    if (rt->err) return rt->err;
+    if (rt->out != stdout && rt->out != NULL) return rt->out;
+    return stderr;
+}
+
 void runtime_init(Runtime *rt) {
     memset(rt, 0, sizeof(*rt));
     program_init(&rt->program);
@@ -42,6 +51,7 @@ void runtime_init(Runtime *rt) {
     console_init(rt);
     rt->out = stdout;
     rt->in = stdin;
+    rt->err = NULL;
     rt->print_col = 0;
     rt->last_error.code = ERR_OK;
     rt->last_error.custom_msg = NULL;
@@ -331,7 +341,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
             rt->temp_stop_line = 0;
             char err_buf[128];
             error_format(&rt->last_error, err_buf, sizeof(err_buf));
-            fprintf(rt->out, "\n%s\n", err_buf);
+            fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
             rt->is_running = false;
             return;
         }
@@ -347,7 +357,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
             rt->cont_stmt_idx = rt->cur_stmt_idx;
             char err_buf[128];
             error_format(&rt->last_error, err_buf, sizeof(err_buf));
-            fprintf(rt->out, "\n%s\n", err_buf);
+            fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
             rt->is_running = false;
             return;
         }
@@ -389,7 +399,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
                 rt->cont_stmt_idx = rt->cur_stmt_idx;
                 char err_buf[128];
                 error_format(&rt->last_error, err_buf, sizeof(err_buf));
-                fprintf(rt->out, "\n%s\n", err_buf);
+                fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
                 rt->is_running = false;
                 token_free(&l.current);
                 return;
@@ -401,7 +411,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
                     rt->can_continue = false;
                     char err_buf[128];
                     error_format(&rt->last_error, err_buf, sizeof(err_buf));
-                    fprintf(rt->out, "\n%s\n", err_buf);
+                    fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
                     rt->is_running = false;
                     token_free(&l.current);
                     return;
@@ -422,7 +432,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
                     }
                     char err_buf[128];
                     error_format(&rt->last_error, err_buf, sizeof(err_buf));
-                    fprintf(rt->out, "\n%s\n", err_buf);
+                    fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
                     rt->is_running = false;
                     token_free(&l.current);
                     return;
@@ -449,7 +459,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
                 rt->last_error.code = ERR_NONSENSE;
                 char err_buf[128];
                 error_format(&rt->last_error, err_buf, sizeof(err_buf));
-                fprintf(rt->out, "\n%s\n", err_buf);
+                fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
                 rt->is_running = false;
                 token_free(&l.current);
                 return;
@@ -470,7 +480,7 @@ static void runtime_run_loop(Runtime *rt, bool first_line_skip_bp) {
         rt->last_error.line_no = (rt->program.count > 0) ? (int32_t)rt->program.lines[rt->program.count - 1].line_no : 0;
         rt->last_error.stmt_index = 1;
         error_format(&rt->last_error, err_buf, sizeof(err_buf));
-        fprintf(rt->out, "\n%s\n", err_buf);
+        fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
     }
     rt->is_running = false;
     rt->can_continue = false;
@@ -489,7 +499,7 @@ void runtime_run(Runtime *rt, uint16_t start_line) {
             rt->last_error.stmt_index = 1;
             char err_buf[128];
             error_format(&rt->last_error, err_buf, sizeof(err_buf));
-            fprintf(rt->out, "\n%s\n", err_buf);
+            fprintf(runtime_get_report_fp(rt), "\n%s\n", err_buf);
             return;
         }
         rt->cur_line_idx = (size_t)idx;
@@ -607,7 +617,7 @@ bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
             rt->last_error.line_no = -1;
             char buf[128];
             error_format(&rt->last_error, buf, sizeof(buf));
-            fprintf(rt->out, "%s\n", buf);
+            fprintf(runtime_get_report_fp(rt), "%s\n", buf);
             return false;
         }
 
@@ -639,7 +649,7 @@ bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
                 rt->last_error.stmt_index = (int32_t)err_col;
                 char err_buf[128];
                 snprintf(err_buf, sizeof(err_buf), "C Nonsense in BASIC, %u:%u", (unsigned int)line_no, (unsigned int)err_col);
-                fprintf(rt->out, "%s\n", err_buf);
+                fprintf(runtime_get_report_fp(rt), "%s\n", err_buf);
                 free(normalized);
                 return false;
             }
@@ -670,7 +680,7 @@ bool runtime_process_input(Runtime *rt, const char *raw_line, bool interactive) 
             if (rt->last_error.code != ERR_OK || interactive) {
                 char buf[128];
                 error_format(&rt->last_error, buf, sizeof(buf));
-                fprintf(rt->out, "%s\n", buf);
+                fprintf(runtime_get_report_fp(rt), "%s\n", buf);
             }
         }
         return (rt->last_error.code == ERR_OK);
@@ -701,6 +711,30 @@ bool runtime_save(Runtime *rt, const char *path) {
     return runtime_save_ext(rt, path, false, 0);
 }
 
+bool runtime_save_code(Runtime *rt, const char *path) {
+    if (!rt || !path) return false;
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    fprintf(f, "#!/usr/bin/env zxbasic\n");
+    program_list(&rt->program, 0, f);
+    fclose(f);
+
+    struct stat st;
+    mode_t new_mode = 0755;
+    if (stat(path, &st) == 0) {
+        new_mode = st.st_mode | S_IXUSR | S_IXGRP | S_IXOTH;
+    }
+    if (chmod(path, new_mode) != 0) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+    return true;
+}
+
 bool runtime_load(Runtime *rt, const char *path) {
     if (!rt || !path) return false;
     FILE *f = fopen(path, "r");
@@ -710,11 +744,31 @@ bool runtime_load(Runtime *rt, const char *path) {
     }
 
     program_clear(&rt->program);
-    runtime_clear(rt);
+    symtab_clear(&rt->symtab);
+    rt->symtab.sysvars = &rt->sysvars;
+    rt->symtab.program = &rt->program;
+    rt->is_running = false;
+    rt->stop_requested = false;
+    rt->jump_requested = false;
+    rt->call_sp = 0;
+    rt->for_sp = 0;
+    rt->can_continue = false;
+    rt->cont_line_idx = 0;
+    rt->cont_stmt_idx = 1;
+    rt->temp_stop_line = 0;
     rt->auto_ran = false;
 
     char line_buf[2048];
+    bool is_first_line = true;
     while (fgets(line_buf, sizeof(line_buf), f)) {
+        if (is_first_line) {
+            is_first_line = false;
+            const char *p = line_buf;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (p[0] == '#' && p[1] == '!') {
+                continue;
+            }
+        }
         runtime_process_input(rt, line_buf, false);
     }
 
@@ -731,7 +785,16 @@ bool runtime_merge(Runtime *rt, const char *path) {
     }
 
     char line_buf[2048];
+    bool is_first_line = true;
     while (fgets(line_buf, sizeof(line_buf), f)) {
+        if (is_first_line) {
+            is_first_line = false;
+            const char *p = line_buf;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (p[0] == '#' && p[1] == '!') {
+                continue;
+            }
+        }
         const char *p = line_buf;
         while (*p && isspace((unsigned char)*p)) p++;
         // Ingest only numbered lines; ignore unnumbered direct commands
@@ -898,25 +961,35 @@ void runtime_channels_init(Runtime *rt) {
         rt->channels[i].mode = CHANNEL_MODE_NONE;
         rt->channels[i].is_open = false;
     }
-    // Stream 0: stdin / input
-    rt->channels[0].fp = rt->in ? rt->in : stdin;
-    rt->channels[0].mode = CHANNEL_MODE_SYSTEM;
+    // Stream 0: stdin / input (read-only)
+    rt->channels[0].mode = CHANNEL_MODE_READ;
     rt->channels[0].is_open = true;
 
-    // Stream 1: stdin / input
-    rt->channels[1].fp = rt->in ? rt->in : stdin;
-    rt->channels[1].mode = CHANNEL_MODE_SYSTEM;
+    // Stream 1: stdout / console output (write-only)
+    rt->channels[1].mode = CHANNEL_MODE_WRITE;
     rt->channels[1].is_open = true;
 
-    // Stream 2: stdout / output
-    rt->channels[2].fp = rt->out ? rt->out : stdout;
-    rt->channels[2].mode = CHANNEL_MODE_SYSTEM;
+    // Stream 2: stderr / reports & errors (write-only)
+    rt->channels[2].mode = CHANNEL_MODE_WRITE;
     rt->channels[2].is_open = true;
 
-    // Stream 3: stderr / printer
-    rt->channels[3].fp = stderr;
-    rt->channels[3].mode = CHANNEL_MODE_SYSTEM;
+    // Stream 3: aux / printer (write-only)
+    rt->channels[3].mode = CHANNEL_MODE_WRITE;
     rt->channels[3].is_open = true;
+}
+
+FILE *runtime_channel_get_fp(Runtime *rt, int ch) {
+    if (!rt || ch < 0 || ch >= MAX_CHANNELS) return NULL;
+    if (rt->channels[ch].fp) return rt->channels[ch].fp;
+    if (ch == 0) return rt->in ? rt->in : stdin;
+    if (ch == 1) return rt->out ? rt->out : stdout;
+    if (ch == 2) {
+        if (rt->err) return rt->err;
+        if (rt->out != stdout && rt->out != NULL) return rt->out;
+        return stderr;
+    }
+    if (ch == 3) return stderr;
+    return NULL;
 }
 
 void runtime_channels_close_all(Runtime *rt) {
@@ -1014,8 +1087,8 @@ bool runtime_channel_move(Runtime *rt, int src_ch, int dest_ch) {
         rt->last_error.code = ERR_NONSENSE;
         return false;
     }
-    FILE *src_fp = s->fp ? s->fp : (src_ch == 0 || src_ch == 1 ? (rt->in ? rt->in : stdin) : NULL);
-    FILE *dest_fp = d->fp ? d->fp : (dest_ch == 2 ? rt->out : (dest_ch == 3 ? stderr : NULL));
+    FILE *src_fp = runtime_channel_get_fp(rt, src_ch);
+    FILE *dest_fp = runtime_channel_get_fp(rt, dest_ch);
     if (!src_fp || !dest_fp) {
         rt->last_error.code = ERR_NONSENSE;
         return false;
@@ -1033,6 +1106,147 @@ bool runtime_channel_move(Runtime *rt, int src_ch, int dest_ch) {
     }
     fflush(dest_fp);
     // Channels remain open!
+    return true;
+}
+
+bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_line, bool has_redirection, int in_ch, int out_ch, int err_ch) {
+    if (!rt || !path) return false;
+
+    if (has_redirection) {
+        if (in_ch < 0 || in_ch >= MAX_CHANNELS ||
+            out_ch < 0 || out_ch >= MAX_CHANNELS ||
+            err_ch < 0 || err_ch >= MAX_CHANNELS) {
+            rt->last_error.code = ERR_INTEGER_RANGE;
+            return false;
+        }
+        if (!rt->channels[in_ch].is_open || !rt->channels[out_ch].is_open || !rt->channels[err_ch].is_open) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        if (rt->channels[in_ch].mode == CHANNEL_MODE_WRITE ||
+            rt->channels[out_ch].mode == CHANNEL_MODE_READ ||
+            rt->channels[err_ch].mode == CHANNEL_MODE_READ) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+    }
+
+    struct stat st;
+    bool is_exec = false;
+
+    char cmd_binary[512];
+    strncpy(cmd_binary, path, sizeof(cmd_binary) - 1);
+    cmd_binary[sizeof(cmd_binary) - 1] = '\0';
+    char *cb = cmd_binary;
+    while (*cb && isspace((unsigned char)*cb)) cb++;
+    char *sp = strchr(cb, ' ');
+    if (sp) *sp = '\0';
+
+    if (stat(cb, &st) == 0 && S_ISREG(st.st_mode) && access(cb, X_OK) == 0) {
+        is_exec = true;
+    } else if (strchr(cb, '/') == NULL) {
+        const char *env_path = getenv("PATH");
+        if (env_path) {
+            char *pcopy = strdup(env_path);
+            char *dir = strtok(pcopy, ":");
+            while (dir) {
+                char test_path[1024];
+                snprintf(test_path, sizeof(test_path), "%s/%s", dir, cb);
+                if (stat(test_path, &st) == 0 && S_ISREG(st.st_mode) && access(test_path, X_OK) == 0) {
+                    is_exec = true;
+                    break;
+                }
+                dir = strtok(NULL, ":");
+            }
+            free(pcopy);
+        }
+    }
+
+    if (is_exec) {
+        FILE *in_fp = runtime_channel_get_fp(rt, in_ch);
+        FILE *out_fp = runtime_channel_get_fp(rt, out_ch);
+        FILE *err_fp = runtime_channel_get_fp(rt, err_ch);
+
+        if (in_fp) fflush(in_fp);
+        if (out_fp) fflush(out_fp);
+        if (err_fp) fflush(err_fp);
+        fflush(stdout);
+        fflush(stderr);
+
+        int in_fd = in_fp ? fileno(in_fp) : STDIN_FILENO;
+        int out_fd = out_fp ? fileno(out_fp) : STDOUT_FILENO;
+        int err_fd = err_fp ? fileno(err_fp) : STDERR_FILENO;
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            rt->last_error.code = ERR_NONSENSE;
+            return false;
+        }
+        if (pid == 0) {
+            if (in_fd != STDIN_FILENO) {
+                dup2(in_fd, STDIN_FILENO);
+            }
+            if (out_fd != STDOUT_FILENO) {
+                dup2(out_fd, STDOUT_FILENO);
+            }
+            if (err_fd != STDERR_FILENO) {
+                dup2(err_fd, STDERR_FILENO);
+            }
+            execl("/bin/sh", "sh", "-c", path, (char *)NULL);
+            _exit(127);
+        }
+
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+
+        int exit_code = 0;
+        if (WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        } else if (WIFSIGNALED(status)) {
+            exit_code = 128 + WTERMSIG(status);
+        }
+
+        sysvar_set_int(&rt->sysvars, "STATUS", exit_code);
+        return true;
+    }
+
+    // Not executable: load as BASIC program
+    if (access(path, F_OK) != 0) {
+        rt->last_error.code = ERR_NONSENSE;
+        return false;
+    }
+
+    rt->auto_ran = false;
+    bool load_ok = runtime_load(rt, path);
+    if (!load_ok) {
+        return false;
+    }
+
+    FILE *saved_in = rt->channels[0].fp;
+    FILE *saved_out = rt->channels[1].fp;
+    FILE *saved_err = rt->channels[2].fp;
+
+    if (has_redirection) {
+        rt->channels[0].fp = runtime_channel_get_fp(rt, in_ch);
+        rt->channels[1].fp = runtime_channel_get_fp(rt, out_ch);
+        rt->channels[2].fp = runtime_channel_get_fp(rt, err_ch);
+    }
+
+    if (start_line > 0) {
+        runtime_run(rt, start_line);
+    } else if (!rt->auto_ran) {
+        runtime_run(rt, 0);
+    }
+
+    if (has_redirection) {
+        rt->channels[0].fp = saved_in;
+        rt->channels[1].fp = saved_out;
+        rt->channels[2].fp = saved_err;
+    }
+
     return true;
 }
 
