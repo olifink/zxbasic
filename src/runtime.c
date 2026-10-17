@@ -1163,7 +1163,7 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
             char *pcopy = strdup(env_path);
             char *dir = strtok(pcopy, ":");
             while (dir) {
-                char test_path[1024];
+                char test_path[2048];
                 snprintf(test_path, sizeof(test_path), "%s/%s", dir, cb);
                 if (stat(test_path, &st) == 0 && S_ISREG(st.st_mode) && access(test_path, X_OK) == 0) {
                     is_exec = true;
@@ -1174,7 +1174,7 @@ bool runtime_run_file_redirect(Runtime *rt, const char *path, uint16_t start_lin
             free(pcopy);
         }
         if (!is_exec && exe_dir[0]) {
-            char test_path[1024];
+            char test_path[2048];
             snprintf(test_path, sizeof(test_path), "%s/%s", exe_dir, cb);
             if (stat(test_path, &st) == 0 && S_ISREG(st.st_mode) && access(test_path, X_OK) == 0) {
                 is_exec = true;
